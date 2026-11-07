@@ -62,6 +62,11 @@ class RoutingTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 release.block_color(block)
 
+    def test_release_checks_only_new_public_domain(self):
+        source = Path(release.__file__).read_text()
+        self.assertNotIn('https://longdaoai.cn', source)
+        self.assertIn('https://ai.longdaoec.com', source)
+
     def test_target_preserves_credentials_mounts_and_network(self):
         original = copy.deepcopy(SERVICE)
         target = release.target_service(SERVICE, 'blue', 'release-image')

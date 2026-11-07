@@ -22,7 +22,7 @@ Model "gpt-5.3-codex-spark" is not supported by any configured account in this g
 2. 获取当前中转账号实际支持的模型。
    - 从现有配置中确定当前 provider、base_url 和认证来源。
    - 在内存中使用已有凭据认证访问模型列表接口；龙道中转接口为：
-     https://longdaoai.cn/v1/models
+     https://ai.longdaoec.com/v1/models
    - 对其他中转根据实际 base_url 构建地址，避免重复添加 /v1。
    - 不在终端输出、命令参数、文档、日志或最终回复中暴露 API Key。
    - 返回 401、403 或无法获得有效模型列表时，不猜测支持情况，不盲目替换。

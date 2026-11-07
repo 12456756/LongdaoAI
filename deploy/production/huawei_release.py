@@ -220,10 +220,7 @@ class Release:
                                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'])
         self.smoke('http://172.19.0.1:%s' % PORTS[self.current])
         self.smoke('https://ai.longdaoec.com')
-        self.smoke('https://longdaoai.cn')
         self.catalog_before = self.key_catalog('https://ai.longdaoec.com')
-        if self.key_catalog('https://longdaoai.cn') != self.catalog_before:
-            raise RuntimeError('Old/new domain API key catalogs differ')
         self.say('Preflight passed: Huawei target, data disk, isolated runtime, current color ' + self.current)
 
     def backup(self, directory):
@@ -302,13 +299,12 @@ class Release:
         active = self.inspect('longdao-ai-' + self.current)
         if active['Image'] == image_info['Id'] and not redeploy:
             self.smoke('https://ai.longdaoec.com', version)
-            self.smoke('https://longdaoai.cn', version)
             if self.key_catalog('https://ai.longdaoec.com') != self.catalog_before:
                 raise RuntimeError('Existing API key catalog changed during verification')
             write_json(self.deploy / 'last-release.json', {'version': version, 'image_id': image_info['Id'],
                        'color': self.current, 'result': 'already-current', 'time_utc': self.timestamp,
                        'target_host': '121.37.128.126', 'runtime': SOCKET})
-            self.say('SUCCESS: requested image already active on 121.37.128.126; version and both domains verified')
+            self.say('SUCCESS: requested image already active on 121.37.128.126; version and new domain verified')
             return
         directory = ROOT / 'backups' / ('release-' + self.timestamp + '-v' + version)
         self.backup(directory)
@@ -346,10 +342,8 @@ class Release:
             for _ in range(6):
                 try:
                     self.smoke('https://ai.longdaoec.com', version)
-                    self.smoke('https://longdaoai.cn', version)
-                    for base in ['https://ai.longdaoec.com', 'https://longdaoai.cn']:
-                        if self.key_catalog(base) != self.catalog_before:
-                            raise RuntimeError('API key catalog verification failed after switch')
+                    if self.key_catalog('https://ai.longdaoec.com') != self.catalog_before:
+                        raise RuntimeError('API key catalog verification failed after switch')
                     break
                 except (RuntimeError, OSError):
                     time.sleep(2)

@@ -1,6 +1,8 @@
 # 华为云生产发布
 
-当前正式服务器为 `121.37.128.126`，正式域名 `ai.longdaoec.com`。旧域名 `longdaoai.cn` 经旧机转发新站。不要在新机运行本目录旧的 `deploy.sh` / `switch.sh` / `docker-compose.yml`；这些属于原服务器部署结构。
+当前正式服务器为 `121.37.128.126`，唯一正式域名为 `ai.longdaoec.com`。旧域名 `longdaoai.cn` 已从运行链路移除，不再作为兼容入口。不要在新机运行本目录旧的 `deploy.sh` / `switch.sh` / `docker-compose.yml`；这些属于原服务器部署结构。
+
+2026-11-07 已完成运行时域名切换：SEP 的 `SUB2API_BASE_URL` 与 `MEDIA_VIDEO_BASE_URL`、龙道 OAuth 回调、支付宝/易支付回调均使用 `ai.longdaoec.com`；新机 Caddy 不再信任旧服务器 IP。历史订单中的旧地址保留作审计记录，不作为当前配置。
 
 ## 服务器入口
 
@@ -18,7 +20,7 @@ python3 /www/longdao/deploy/huawei_release.py --version 2026.10.21-2
 cat /www/longdao/deploy/last-release.json
 ```
 
-`--redeploy` 是管理员同版本演练选项；CI 不开放这个参数。普通同镜像重跑只验证镜像 ID、实际版本、原 Key 的模型目录和新旧域名，不重启当前实例。
+`--redeploy` 是管理员同版本演练选项；CI 不开放这个参数。普通同镜像重跑只验证镜像 ID、实际版本、原 Key 的模型目录和新域名，不重启当前实例。
 
 ## 发布过程
 
@@ -28,7 +30,7 @@ cat /www/longdao/deploy/last-release.json
 4. 用目标镜像执行独立 `-migrate` 命令；失败不启动目标应用。迁移必须兼容当前版本，脚本不自动恢复数据库。
 5. 启动目标色：green 使用 `172.19.0.1:18080`，blue 使用 `172.19.0.1:18081`。两色共享原应用数据、业务库及 Redis，环境密钥不重生成。
 6. 验证目标容器健康、镜像 ID、公开版本、页面、原 Key 的模型目录；不发起付费模型请求。
-7. 保留其他 Caddy 配置，仅替换 `LONGDAO-AI` 标记块中的 upstream，校验后原位写入并 reload。验证新旧域名及 SEP 连续运行。
+7. 保留其他 Caddy 配置，仅替换 `LONGDAO-AI` 标记块中的 upstream，校验后原位写入并 reload。验证新域名及 SEP 连续运行。
 8. 保存与入口一致的 Compose，关闭旧色自动重启并优雅停止旧色，写入 `last-release.json`。
 
 首次发布后 Compose 存在两色服务，但日常只能显式启动一个服务。不要使用不带服务名的 `compose up`；不要在主 Docker 运行本项目。
@@ -54,7 +56,7 @@ longdao-preflight
 longdao-deploy 2026.10.21-2
 ```
 
-兼容入口也严格接受旧版已发布 workflow 的 `DEPLOY_PATH=/www/longdao VERSION=<version> bash -s` 格式：只提取固定路径和合法版本，消费并丢弃旧 heredoc，转入新服务器发布器，绝不执行旧栈脚本。因此既有标签和在线旧 workflow 也能在新机正确发布；无需修改已有 Git 标签或让服务器保留旧仓库结构。
+兼容入口仍严格接受旧版已发布 workflow 的 `DEPLOY_PATH=/www/longdao VERSION=<version> bash -s` 格式：只提取固定路径和合法版本，消费并丢弃旧 heredoc，转入新服务器发布器，绝不执行旧栈脚本。因此既有标签和在线旧 workflow 也能在新机正确发布；无需修改已有 Git 标签或让服务器保留旧仓库结构。
 
 仓库新版 `release.yml` 已改成直接调用 `longdao-deploy`，本地代码未提交/推送时，线上仍通过上述兼容入口工作。未来发布同样使用 GitHub production Environment，已发布 workflow 与新版 workflow 都能进入相同的新机发布器。普通 main 推送不触发 Release；版本标签 `v*` 或手动 Release 才触发。
 
