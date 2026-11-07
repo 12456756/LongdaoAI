@@ -1,0 +1,161 @@
+{
+  "method": "production application service verifyProfile then getRuntimeVideoV3; no generation submitted",
+  "BEFORE": {
+    "profileId": "auto-video-f5fd6c27a5bb8cbb0b7b11c6",
+    "modelId": "minimax-h3",
+    "enabled": true,
+    "verified": false,
+    "configVersion": "cfg_8112970d-9482-49a5-8cf6-4eae768bb973"
+  },
+  "VERIFICATION": {
+    "profile": {
+      "profileId": "auto-video-f5fd6c27a5bb8cbb0b7b11c6",
+      "kind": "video",
+      "displayName": "minimax-h3",
+      "modelId": "minimax-h3",
+      "configVersion": "cfg_2f197791-41cd-4176-8c7c-8737b138a5c1",
+      "operations": [
+        "image-to-video",
+        "text-to-video"
+      ],
+      "executionMode": "async-query",
+      "capabilities": {
+        "supportsTextToVideo": true,
+        "supportsImageToVideo": true,
+        "supportsAudio": true,
+        "durationsSeconds": [
+          4
+        ],
+        "aspectRatios": [
+          "16:9"
+        ],
+        "resolutions": [
+          "720p"
+        ],
+        "frameRates": [
+          24
+        ],
+        "maxInputBytes": 10485760,
+        "maxReferenceCount": 1,
+        "outputFormats": [
+          "video/mp4"
+        ],
+        "supportsTaskQuery": true,
+        "supportsCancel": false,
+        "resultRetentionSeconds": 86400
+      },
+      "enabled": true,
+      "verified": true
+    },
+    "checkedAt": "2026-11-03T11:05:44.711Z",
+    "executionTested": false,
+    "mock": false
+  },
+  "RUNTIME": {
+    "capturedAt": "2026-11-03T11:05:44.714Z",
+    "subscription": {
+      "id": "cmv4vqty6008fo601x5y5h7aa",
+      "enterpriseId": "demo-ent-shuyi",
+      "status": "ACTIVE"
+    },
+    "video": {
+      "protocolVersion": 3,
+      "executionMode": "real",
+      "executionAvailable": true,
+      "defaultProfileId": "auto-video-f5fd6c27a5bb8cbb0b7b11c6",
+      "tools": [
+        "video_from_image",
+        "video_generate",
+        "video_get_job"
+      ],
+      "profiles": [
+        {
+          "profileId": "auto-video-f5fd6c27a5bb8cbb0b7b11c6",
+          "configVersion": "cfg_2f197791-41cd-4176-8c7c-8737b138a5c1",
+          "kind": "video",
+          "displayName": "minimax-h3",
+          "operations": [
+            "image-to-video",
+            "text-to-video"
+          ],
+          "executionMode": "async-query",
+          "authorized": true,
+          "adapter": {
+            "id": "sub2api-video",
+            "version": "3",
+            "available": true,
+            "operations": [
+              "image-to-video",
+              "text-to-video"
+            ],
+            "referenceSupport": {
+              "maxCount": 1,
+              "maxInputBytes": 10485760,
+              "mimeTypes": [
+                "image/png"
+              ]
+            },
+            "supportsTaskQuery": true,
+            "supportsCancel": false
+          },
+          "capabilityHints": [
+            {
+              "field": "durationSeconds",
+              "values": [
+                4
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            },
+            {
+              "field": "aspectRatio",
+              "values": [
+                "16:9"
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            },
+            {
+              "field": "resolution",
+              "values": [
+                "720p"
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            },
+            {
+              "field": "frameRate",
+              "values": [
+                24
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            },
+            {
+              "field": "audio",
+              "values": [
+                true
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            },
+            {
+              "field": "outputFormat",
+              "values": [
+                "video/mp4"
+              ],
+              "source": "profile-config",
+              "observedAt": null,
+              "confidence": "declared"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

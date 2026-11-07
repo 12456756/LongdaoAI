@@ -1,5 +1,7 @@
 # 龙道 AI 生产部署（Docker Compose + 容器化 Caddy）
 
+**2026-11-03 华为云迁移后，正式部署与运维请使用 [HUAWEI.md](HUAWEI.md)。** 目标为 `121.37.128.126` 的 `/www/longdao`，使用独立 Docker；本页后续的传统 Compose/脚本步骤保留作旧部署参考，不能直接用于新机。
+
 本目录是龙道 AI 的**生产环境**部署清单，相较上游 `deploy/docker-compose.yml` 做了安全与稳定性收敛：
 
 - 应用镜像固定为自有版本化 tag（禁止 `latest`）。
@@ -173,6 +175,8 @@ OBSERVE_SECONDS=15 ./switch.sh
 
 ## GitHub Actions 自动部署
 
+**华为云生产环境以 [HUAWEI.md](HUAWEI.md) 为准。** 当前服务器为 `121.37.128.126`，目录 `/www/longdao`，入口使用独立 Docker 和服务器发布器；下方旧蓝绿脚本不能直接在新机执行。已发布 workflow 由受限 SSH 兼容入口转入新发布器。
+
 `.github/workflows/release.yml` 在 Release 成功后提供生产部署 job。为避免未配置凭据时误触发，
 只有 production Environment 变量 `PRODUCTION_DEPLOY_ENABLED=true` 时才会执行。
 
@@ -181,12 +185,12 @@ OBSERVE_SECONDS=15 ./switch.sh
 | 类型 | 名称 | 示例 |
 |------|------|------|
 | Variable | `PRODUCTION_DEPLOY_ENABLED` | `true` |
-| Variable | `PRODUCTION_SSH_HOST` | `64.83.39.223` |
+| Variable | `PRODUCTION_SSH_HOST` | `121.37.128.126` |
 | Variable | `PRODUCTION_SSH_USER` | `root` |
-| Variable | `PRODUCTION_DEPLOY_PATH` | `/opt/longdao` |
-| Variable | `PRODUCTION_URL` | `https://longdaoai.cn` |
+| Variable | `PRODUCTION_DEPLOY_PATH` | `/www/longdao` |
+| Variable | `PRODUCTION_URL` | `https://ai.longdaoec.com` |
 | Secret | `PRODUCTION_SSH_PRIVATE_KEY` | 部署专用 SSH 私钥全文 |
-| Secret | `PRODUCTION_SSH_KNOWN_HOSTS` | `ssh-keyscan -H 64.83.39.223` 输出 |
+| Secret | `PRODUCTION_SSH_KNOWN_HOSTS` | 经已认证管理连接核实的新机 SSH 主机公钥 |
 
 建议为 Actions 单独创建部署密钥，只授权生产机的发布账号，并给 `production` Environment
 配置 required reviewers。工作流会按版本串行执行：拉取不可变 GHCR 镜像 → 备份 → 迁移 →

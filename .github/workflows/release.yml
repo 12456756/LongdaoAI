@@ -314,6 +314,8 @@ jobs:
   # 需要在 production Environment 中配置变量：
   # PRODUCTION_SSH_HOST、PRODUCTION_SSH_USER、PRODUCTION_DEPLOY_PATH、PRODUCTION_URL，
   # 以及 Secrets：PRODUCTION_SSH_PRIVATE_KEY、PRODUCTION_SSH_KNOWN_HOSTS。
+  # Huawei target uses a restricted SSH command and a server-managed release
+  # entry, which selects the isolated Docker runtime and preserves SEP.
   deploy-production:
     name: Deploy production
     needs: [release, sync-version-file]
@@ -358,12 +360,14 @@ jobs:
         env:
           DEPLOY_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
           DEPLOY_USER: ${{ vars.PRODUCTION_SSH_USER }}
-          DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH || '/opt/longdao' }}
+          DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH || '/www/longdao' }}
           RELEASE_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_HOST" || { echo 'Missing production SSH host' >&2; exit 1; }
           test -n "$DEPLOY_USER" || { echo 'Missing production SSH user' >&2; exit 1; }
+          test "$DEPLOY_HOST" = '121.37.128.126' || { echo 'Unexpected production host' >&2; exit 1; }
+          test "$DEPLOY_PATH" = '/www/longdao' || { echo 'Unexpected production data path' >&2; exit 1; }
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="$RELEASE_TAG"
           else
@@ -377,32 +381,11 @@ jobs:
           ssh -i "$HOME/.ssh/production_deploy_key" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "DEPLOY_PATH=$(printf '%q' "$DEPLOY_PATH") VERSION=$(printf '%q' "$VERSION") bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd "$DEPLOY_PATH"
-          git fetch origin main
-          # Production keeps local Caddy/Compose overrides for shared services.
-          # Fetch the release ref for auditability, but never overwrite or merge
-          # the deployment working tree during an application image rollout.
-          test -x deploy/production/deploy.sh
-          test -f deploy/production/.env
-          if grep -q '^IMAGE_REPO=' deploy/production/.env; then
-            sed -i 's#^IMAGE_REPO=.*#IMAGE_REPO=ghcr.io/yaoruiquan/sub2api#' deploy/production/.env
-          else
-            printf '\nIMAGE_REPO=ghcr.io/yaoruiquan/sub2api\n' >> deploy/production/.env
-          fi
-          if grep -q '^IMAGE_TAG=' deploy/production/.env; then
-            sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=$VERSION#" deploy/production/.env
-          else
-            printf 'IMAGE_TAG=%s\n' "$VERSION" >> deploy/production/.env
-          fi
-          docker pull "ghcr.io/yaoruiquan/sub2api:$VERSION"
-          IMAGE_REPO=ghcr.io/yaoruiquan/sub2api bash deploy/production/deploy.sh
-          REMOTE
+            "longdao-deploy $VERSION" </dev/null
 
       - name: Verify production endpoint
         env:
-          PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://longdaoai.cn' }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://ai.longdaoec.com' }}
         run: |
           set -euo pipefail
           for attempt in {1..12}; do

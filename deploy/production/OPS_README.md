@@ -1,5 +1,7 @@
 # 龙道 AI 生产运维手册
 
+**华为云当前生产环境以 [HUAWEI.md](HUAWEI.md) 为准。** 以下默认 `.env`、Compose 和旧目录的命令属于原部署结构，不直接适用于 `/www/longdao` 的独立运行时。
+
 本目录存放龙道 AI Token 中转平台的生产运维脚本，配合生产编排文件
 （`docker-compose.yml` / `.env` / `Caddyfile`）使用。所有脚本均为 `set -euo pipefail`
 的健壮 bash，凭据一律从 `.env` 读取，脚本内不含任何真实密钥。
