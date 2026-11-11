@@ -239,18 +239,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
-	// 图片模型档位别名（gpt-image-2-2k）在入口就展开成"基础模型 + size"：
-	// 上游只售卖基础模型，size 随后由 normalizeOpenAIResponsesImageOnlyModel
-	// 迁移进 image_generation 工具（已实测上游认工具里的 size）。
-	if expandedBody, aliasBase, aliasSize, aliasOK := service.ExpandOpenAIImageModelSizeAlias(body); aliasOK {
-		body = expandedBody
-		reqLog.Info("openai.image_model_size_alias_expanded",
-			zap.String("requested_model", reqModel),
-			zap.String("base_model", aliasBase),
-			zap.String("applied_size", aliasSize),
-		)
-		reqModel = aliasBase
-	}
 
 	reqStream, ok := parseOpenAICompatibleStream(body)
 	if !ok {

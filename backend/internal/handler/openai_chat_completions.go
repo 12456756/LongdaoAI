@@ -88,17 +88,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 档位别名在 Chat Completions 入口只展开模型名、不带 size：上游这条路会忽略
-	// size，展开后至少能正常出图（尺寸取上游默认），比直接 model_not_found 更可用。
-	if aliasBase, _, aliasOK := service.ParseOpenAIImageModelSizeAlias(reqModel); aliasOK {
-		body = h.gatewayService.ReplaceModelInBody(body, aliasBase)
-		reqLog.Info("openai_chat_completions.image_model_size_alias_expanded",
-			zap.String("requested_model", reqModel),
-			zap.String("base_model", aliasBase),
-		)
-		reqModel = aliasBase
-	}
-
 	// 生图并发槽：图片模型从 Chat Completions 入口进来时同样要占槽，否则这条路会
 	// 绕过 /responses 与 /v1/images/* 上已有的生图并发限制。
 	if service.IsGPTImageGenerationModel(reqModel) {

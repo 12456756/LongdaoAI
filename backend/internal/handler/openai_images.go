@@ -68,15 +68,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		setOpsRequestContext(c, "", false)
 	}
 
-	// 档位别名展开：multipart 请求体非 JSON，此处是 no-op，其模型名按原样处理。
-	if expandedBody, aliasBase, aliasSize, aliasOK := service.ExpandOpenAIImageModelSizeAlias(body); aliasOK {
-		body = expandedBody
-		reqLog.Info("openai.images.model_size_alias_expanded",
-			zap.String("base_model", aliasBase),
-			zap.String("applied_size", aliasSize),
-		)
-	}
-
 	parsed, err := h.gatewayService.ParseOpenAIImagesRequest(c, body)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
