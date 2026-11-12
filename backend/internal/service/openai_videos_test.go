@@ -163,6 +163,10 @@ func TestVideoTaskBindingIsScopedAndNeverFallsBack(t *testing.T) {
 	got, err := svc.GetVideoTaskAccount(context.Background(), apiKey, "video_1")
 	require.NoError(t, err)
 	require.Equal(t, int64(7), got.ID)
+	account.Credentials = map[string]any{openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions"}}
+	_, err = svc.GetVideoTaskAccount(context.Background(), apiKey, "video_1")
+	require.ErrorIs(t, err, ErrVideoTaskNotFound)
+	account.Credentials = nil
 	for _, key := range []*APIKey{{ID: 10, GroupID: &groupID}, {ID: 9}} {
 		_, err := svc.GetVideoTaskAccount(context.Background(), key, "video_1")
 		require.ErrorIs(t, err, ErrVideoTaskNotFound)

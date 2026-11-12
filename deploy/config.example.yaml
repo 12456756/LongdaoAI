@@ -858,6 +858,31 @@ database:
   conn_max_idle_time_minutes: 5
 
 # =============================================================================
+# Legacy video references and downloads
+# =============================================================================
+video_legacy:
+  reference_dir: "/app/media/video-inputs"
+  public_base_url: "https://ai.longdaoec.com"
+  # Supply persistent, independent base64-encoded random keys (at least 32 bytes).
+  # Leave signing_key_id empty until both colors share the storage mount and keys.
+  signing_key_id: ""
+  signing_keys: {}
+  # Set capacity and free-space limits for the actual data disk before image requests.
+  max_storage_bytes: 0
+  min_free_bytes: 0
+  upload_concurrency: 2
+  reference_download_concurrency: 4
+  # Zero leaves rate limiting disabled; concurrency and file-size limits still apply.
+  reference_bytes_per_second: 0
+  # Exact HTTPS CDN hosts confirmed by the provider; no wildcard or arbitrary proxy.
+  download_allowed_hosts: []
+  download_timeout_seconds: 150
+  download_idle_seconds: 20
+  # Configure confirmed resolutions, ratios and audio support for each enabled model.
+  # Model entries accept: resolutions: [...], ratios: [...], supports_audio: true/false.
+  models: {}
+
+# =============================================================================
 # Redis Configuration
 # Redis 配置
 # =============================================================================

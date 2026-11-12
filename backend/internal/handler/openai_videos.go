@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,6 +53,24 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 	requestModel := ""
 	var channelMapping service.ChannelMappingResult
 	if create {
+		if !service.GroupAllowsImageGeneration(apiKey.Group) {
+			h.errorResponse(c, http.StatusForbidden, "permission_error", "Media generation is not enabled for this group")
+			return
+		}
+		mediaType, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
+		if mediaType == "multipart/form-data" {
+			if encoding := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Encoding"))); encoding != "" && encoding != "identity" {
+				h.errorResponse(c, http.StatusUnsupportedMediaType, "unsupported_encoding", "Compressed video uploads are not supported")
+				return
+			}
+			release, slotErr := h.gatewayService.AcquireVideoUpload(ctx)
+			if slotErr != nil {
+				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Video upload concurrency limit reached")
+				return
+			}
+			defer release()
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.VideoUploadMaxBytes)
+		}
 		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
 			if maxErr, ok := extractMaxBytesError(err); ok {
@@ -67,10 +86,6 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 			return
 		}
 		requestModel = request.Model
-		if !service.GroupAllowsImageGeneration(apiKey.Group) {
-			h.errorResponse(c, http.StatusForbidden, "permission_error", "Media generation is not enabled for this group")
-			return
-		}
 		// Reuse the media moderation policy for prompts and reference images.
 		if moderationBody := request.ModerationBody(); len(moderationBody) > 0 {
 			decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)

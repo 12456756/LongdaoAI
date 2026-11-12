@@ -36,19 +36,21 @@ type OpenAIVideoRequest struct {
 	Prompt      string
 	Seconds     int
 	Resolution  string
+	fields      map[string]string
+	otherFiles  int
 	moderation  GrokMediaRequestInfo
 }
 
 func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoRequest, error) {
 	r := &OpenAIVideoRequest{Body: body, ContentType: contentType}
 	fields := make(map[string]string)
-	r.moderation = ParseGrokMediaRequest(contentType, body)
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil && contentType != "" {
 		return nil, fmt.Errorf("invalid Content-Type")
 	}
 	switch mediaType {
 	case "", "application/json":
+		r.moderation = ParseGrokMediaRequest(contentType, body)
 		if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
 			return nil, fmt.Errorf("request body must be a JSON object")
 		}
@@ -70,6 +72,7 @@ func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoReque
 			return nil, fmt.Errorf("multipart boundary is required")
 		}
 		r.Multipart = true
+		r.moderation.N = 1
 		reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 		for {
 			part, err := reader.NextPart()
@@ -95,14 +98,37 @@ func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoReque
 					return nil, fmt.Errorf("duplicate multipart field: %s", name)
 				}
 				fields[name] = string(value)
+			} else {
+				r.otherFiles++
+				if name := part.FormName(); name == "mask" || name == "image" || strings.HasPrefix(name, "image[") {
+					data, err := io.ReadAll(part)
+					if err != nil {
+						return nil, fmt.Errorf("invalid image upload")
+					}
+					upload := OpenAIImagesUpload{FieldName: name, FileName: part.FileName(), ContentType: part.Header.Get("Content-Type"), Data: data}
+					if name == "mask" {
+						r.moderation.MaskUpload = &upload
+					} else {
+						r.moderation.Uploads = append(r.moderation.Uploads, upload)
+					}
+				}
 			}
 			_ = part.Close()
 		}
+		for _, name := range []string{"image", "image_url"} {
+			if value := strings.TrimSpace(fields[name]); value != "" {
+				r.moderation.InputImageURLs = append(r.moderation.InputImageURLs, value)
+			}
+		}
+		r.moderation.MaskImageURL = firstNonEmptyString(fields["mask"], fields["mask_image_url"])
 	default:
 		return nil, fmt.Errorf("Content-Type must be application/json or multipart/form-data")
 	}
 	r.Model = strings.TrimSpace(fields["model"])
+	r.fields = fields
 	r.Prompt = strings.TrimSpace(fields["prompt"])
+	r.moderation.Model = r.Model
+	r.moderation.Prompt = r.Prompt
 	if r.Model == "" || r.Prompt == "" {
 		return nil, fmt.Errorf("model and prompt are required")
 	}
@@ -174,7 +200,7 @@ func (s *OpenAIGatewayService) GetVideoTaskAccount(ctx context.Context, apiKey *
 		return nil, fmt.Errorf("read video task account: %w", err)
 	}
 	if account == nil || !account.IsOpenAI() || account.Type != AccountTypeAPIKey || account.Status != StatusActive ||
-		!s.openAIAccountMatchesSchedulingGroup(account, apiKey.GroupID) {
+		!account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityVideos) || !s.openAIAccountMatchesSchedulingGroup(account, apiKey.GroupID) {
 		return nil, ErrVideoTaskNotFound
 	}
 	return account, nil
@@ -214,6 +240,28 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	}
 	if request != nil && (s.cache == nil || apiKey == nil) {
 		return nil, errors.New("video task storage is unavailable")
+	}
+	protocol := account.VideoProtocol()
+	if request == nil {
+		meta, metaErr := s.videoTaskMetadata(ctx, apiKey, taskID)
+		if metaErr == nil {
+			if meta.AccountID != account.ID {
+				return nil, errors.New("video task account mismatch")
+			}
+			protocol = meta.Protocol
+		} else if !errors.Is(metaErr, redis.Nil) {
+			if _, available := s.cache.(VideoStateStore); available {
+				return nil, metaErr
+			}
+		} else if protocol == VideoProtocolLegacy || strings.HasPrefix(taskID, "mtask_") {
+			return nil, errors.New("video task metadata is missing")
+		}
+	}
+	if protocol == VideoProtocolLegacy {
+		return s.forwardLegacyVideo(ctx, c, account, apiKey, request, taskID, content, mappedModel)
+	}
+	if protocol != VideoProtocolOpenAI {
+		return nil, errors.New("unsupported video protocol")
 	}
 	base, err := s.validateUpstreamBaseURL(account.GetOpenAIBaseURL())
 	if err != nil {
@@ -325,6 +373,15 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 			logger.LegacyPrintf("service.openai_gateway", "bind video task account failed: account_id=%d task_id=%s err=%v", account.ID, result.ResponseID, err)
 		}
 		result.VideoCount = 1
+		if store, storeErr := s.videoStore(); storeErr == nil {
+			now := time.Now().Unix()
+			meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: result.ResponseID, APIKeyID: apiKey.ID, GroupID: derefGroupID(apiKey.GroupID), AccountID: account.ID, Protocol: VideoProtocolOpenAI, RequestedModel: originalModel, UpstreamModel: billingModel, BillingRequestID: resolveUsageBillingRequestID(ctx, result.RequestID), BoundAt: now, ExpiresAt: now + 604800}
+			metadataCtx, metadataCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if err := store.VideoBind(metadataCtx, meta); err != nil {
+				logger.LegacyPrintf("service.openai_gateway", "bind native video metadata failed: account_id=%d task_id=%s", account.ID, result.ResponseID)
+			}
+			metadataCancel()
+		}
 		result.VideoResolution = request.Resolution
 		result.VideoDurationSeconds = request.Seconds
 		if seconds := firstPositiveGJSONInt(gjson.GetBytes(responseBody, "seconds"), gjson.GetBytes(responseBody, "duration")); seconds > 0 {

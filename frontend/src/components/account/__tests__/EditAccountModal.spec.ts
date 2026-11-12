@@ -395,6 +395,20 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('loads and changes the video protocol without clearing account credentials', async () => {
+    const account = buildAccount()
+    Object.assign(account.credentials, { video_protocol: 'naoshengyun_legacy' })
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const protocol = wrapper.get('[data-testid="openai-video-protocol"]')
+    expect((protocol.element as HTMLSelectElement).value).toBe('naoshengyun_legacy')
+    await protocol.setValue('openai_videos')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.video_protocol).toBe('openai_videos')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.api_key).toBe('sk-test')
+  })
+
   it('loads and submits the per-account OpenAI long-context billing toggle', async () => {
     const account = buildAccount()
     account.extra = {

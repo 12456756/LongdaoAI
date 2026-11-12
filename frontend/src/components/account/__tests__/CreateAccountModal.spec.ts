@@ -155,6 +155,20 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
+  it('saves the selected legacy video protocol', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Seedance')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-key')
+    const protocol = wrapper.findComponent('[data-testid="openai-video-protocol"]')
+    expect(protocol.exists()).toBe(true)
+    protocol.vm.$emit('update:modelValue', 'naoshengyun_legacy')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.video_protocol).toBe('naoshengyun_legacy')
+  })
+
   it('exposes Agent Identity in the OpenAI authorization methods', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

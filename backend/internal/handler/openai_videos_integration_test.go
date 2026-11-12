@@ -96,6 +96,18 @@ func TestOpenAIVideosHandlerCreatePollDownloadAndOwnership(t *testing.T) {
 		router.ServeHTTP(w, r)
 		return w
 	}
+	tooLarge := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(strings.Repeat("x", int(service.VideoUploadMaxBytes)+1)))
+	tooLarge.Header.Set("Content-Type", "Multipart/Form-Data; boundary=testing")
+	rejected := httptest.NewRecorder()
+	router.ServeHTTP(rejected, tooLarge)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rejected.Code)
+	compressed := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader("compressed"))
+	compressed.Header.Set("Content-Type", "multipart/form-data; boundary=testing")
+	compressed.Header.Set("Content-Encoding", "gzip")
+	rejected = httptest.NewRecorder()
+	router.ServeHTTP(rejected, compressed)
+	require.Equal(t, http.StatusUnsupportedMediaType, rejected.Code)
+	require.Empty(t, upstream.paths)
 	created := perform(http.MethodPost, "/v1/video/generations", `{"model":"minimax-h3","prompt":"waves","seconds":"6","size":"1280x720"}`)
 	require.Equal(t, 200, created.Code, created.Body.String())
 	require.Len(t, usageRepo.logs, 1)

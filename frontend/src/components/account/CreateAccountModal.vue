@@ -3022,6 +3022,10 @@
           </div>
           <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
         </div>
+        <div v-if="openAIEndpointCapabilities.includes('videos')">
+          <label class="input-label">{{ t('admin.accounts.openai.videoProtocol') }}</label>
+          <Select v-model="openAIVideoProtocol" :options="openAIVideoProtocolOptions" data-testid="openai-video-protocol" />
+        </div>
       </div>
 
       <div>
@@ -3757,6 +3761,11 @@ const openAILongContextBillingTouched = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings', 'videos'])
+const openAIVideoProtocol = ref('openai_videos')
+const openAIVideoProtocolOptions = computed(() => [
+  { value: 'openai_videos', label: t('admin.accounts.openai.videoProtocolNative') },
+  { value: 'naoshengyun_legacy', label: t('admin.accounts.openai.videoProtocolLegacy') }
+])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -3874,6 +3883,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
+  credentials.video_protocol = openAIVideoProtocol.value
   const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
   if (capabilities.length === 3) {
     delete credentials.openai_capabilities
@@ -4207,6 +4217,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings', 'videos']
+      openAIVideoProtocol.value = 'openai_videos'
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
@@ -4624,6 +4635,7 @@ const resetForm = () => {
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings', 'videos']
+  openAIVideoProtocol.value = 'openai_videos'
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false

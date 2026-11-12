@@ -19,6 +19,9 @@ import (
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecoveryWithWriter(gin.DefaultErrorWriter, func(c *gin.Context, recovered any) {
 		recoveredErr, _ := recovered.(error)
+		if errors.Is(recoveredErr, http.ErrAbortHandler) {
+			panic(http.ErrAbortHandler)
+		}
 
 		if isBrokenPipe(recoveredErr) {
 			if recoveredErr != nil {

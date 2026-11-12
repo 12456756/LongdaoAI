@@ -37,6 +37,17 @@ cat /www/longdao/deploy/last-release.json
 
 发布快照属于在线备份，各存储的快照时间有先后，不承诺 PG、Redis 与文件之间的跨存储原子一致性。旧迁移冻结备份另行保留；发布备份不自动删除，不代替异地定时备份。
 
+## Seedance 旧版视频适配的部署配置
+
+应用代码保留 `/v1/videos`，账号凭据 `video_protocol=naoshengyun_legacy` 才启用旧协议。已有账号缺省为 `openai_videos`。以下配置对应开发方案，不代表服务器已经完成配置。
+
+- 通过当前 `/www/longdao/deploy/huawei_release.py` 管理的配置，为 blue、green 添加相同挂载：`/www/longdao/media/video-inputs:/app/media/video-inputs`。不要使用本目录旧 Compose 发布。
+- 检查真实应用 UID/GID，图片根目录权限为 `0700`，图片及清单为 `0600`。该目录不放入公开静态目录，不进入每次发布的全量应用文件复制。
+- 在应用私密配置中填写 `video_legacy`，字段见 `deploy/config.example.yaml`。配置实际容量、剩余空间阈值、并发、已确认的模型规格和精确 CDN 域名；未配置的规格和下载域名会被拒绝。
+- `signing_keys` 使用独立的至少 32 随机字节的 base64 密钥；两色一致、重启不重生成。轮换后保留旧密钥至旧链接全部到期。不得把实际密钥提交仓库。
+- Caddy 将 `/media/video-inputs/` 代理给应用，不使用 `file_server`，不加 API Key 或浏览器登录校验，不缓存响应；访问日志隐藏签名查询串。应用普通日志只使用资源编号，不记录完整签名 URL。
+- 核对 Caddy 的传输期限和连接关闭行为，匹配应用下载总预算（示例 150 秒）及 SEP 的 180 秒限制；文件 GET 不包含账号密钥，Longdao 不保存成品视频。
+- 非付费检查包括外网 GET/HEAD 读取签名参考图、两色挂载及密钥一致、重启后可读、到期拒绝和清理。任务、图片、幂等记录继续使用原 Redis，期限固定 7 天。SEP 原 24 小时成品缓存不变。
 ## GitHub production Environment
 
 | 类型 | 名称 | 华为云值 |

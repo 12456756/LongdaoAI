@@ -96,6 +96,7 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	VideoLegacy             VideoLegacyConfig             `mapstructure:"video_legacy"`
 }
 
 type LogConfig struct {
@@ -1921,6 +1922,7 @@ func setDefaults() {
 
 	// Image storage (async image task result offload to S3-compatible object storage)
 	viper.SetDefault("image_storage.enabled", false)
+	setVideoLegacyDefaults()
 	viper.SetDefault("image_storage.region", "auto")
 	viper.SetDefault("image_storage.prefix", "images/")
 	viper.SetDefault("image_storage.force_path_style", false)
