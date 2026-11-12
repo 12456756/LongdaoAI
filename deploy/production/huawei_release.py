@@ -23,7 +23,7 @@ EDGE_DOCKER = ['/usr/bin/docker', '-H', 'unix:///var/run/docker.sock']
 CADDY = Path('/www/sep/deploy/Caddyfile')
 BEGIN, END = '# LONGDAO-AI-BEGIN', '# LONGDAO-AI-END'
 PORTS = {'green': 18080, 'blue': 18081}
-REPO = 'ghcr.io/yaoruiquan/sub2api'
+REPO = 'ghcr.io/12456756/sub2api'
 VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9]+')
 SEP = ['sep-green-web', 'sep-green-backend', 'sep-caddy',
        'sep-postgres', 'sep-redis', 'sep-downloads']
