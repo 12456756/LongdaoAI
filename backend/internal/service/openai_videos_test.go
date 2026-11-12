@@ -90,7 +90,7 @@ func TestParseOpenAIVideoRequest(t *testing.T) {
 }
 
 func TestForwardVideoCreatesAndBindsTask(t *testing.T) {
-	body := []byte(`{"model":"video-alias","prompt":"waves","seconds":"20","size":"1280x720","audio":false}`)
+	body := []byte(`{"model":"video-alias","prompt":"waves","seconds":"20","size":"1280x720","audio":false,"fps":30,"extra":{"enabled":true}}`)
 	request, err := ParseOpenAIVideoRequest(body, "application/json")
 	require.NoError(t, err)
 	c, w := videoTestContext(http.MethodPost, "/v1/videos", body, request.ContentType)
@@ -106,6 +106,8 @@ func TestForwardVideoCreatesAndBindsTask(t *testing.T) {
 		require.Equal(t, "minimax-h3", gjson.GetBytes(forwarded, "model").String())
 		require.Equal(t, "20", gjson.GetBytes(forwarded, "seconds").String())
 		require.True(t, gjson.GetBytes(forwarded, "audio").Exists())
+		require.Equal(t, int64(30), gjson.GetBytes(forwarded, "fps").Int())
+		require.True(t, gjson.GetBytes(forwarded, "extra.enabled").Bool())
 		return &http.Response{StatusCode: http.StatusAccepted, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"video_123","status":"queued","seconds":"20","size":"1280x720"}`))}, nil
 	}}}
 	result, err := svc.ForwardVideo(context.Background(), c, account, apiKey, request, "", false, "")
@@ -127,6 +129,8 @@ func TestForwardVideoMultipartPreservesReferenceAndMapsModel(t *testing.T) {
 	require.NoError(t, w.WriteField("model", "alias"))
 	require.NoError(t, w.WriteField("prompt", "animate"))
 	require.NoError(t, w.WriteField("seconds", "6"))
+	require.NoError(t, w.WriteField("fps", "30"))
+	require.NoError(t, w.WriteField("extra", "preserved"))
 	part, err := w.CreateFormFile("input_reference", "frame.png")
 	require.NoError(t, err)
 	_, err = part.Write([]byte("reference-bytes"))
@@ -139,6 +143,8 @@ func TestForwardVideoMultipartPreservesReferenceAndMapsModel(t *testing.T) {
 		require.NoError(t, r.ParseMultipartForm(1<<20))
 		require.Equal(t, "minimax-h3", r.FormValue("model"))
 		require.Equal(t, "6", r.FormValue("seconds"))
+		require.Equal(t, "30", r.FormValue("fps"))
+		require.Equal(t, "preserved", r.FormValue("extra"))
 		f, header, err := r.FormFile("input_reference")
 		require.NoError(t, err)
 		defer f.Close()

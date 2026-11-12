@@ -148,6 +148,9 @@ func TestLegacyVideoCreateReplayAndQuery(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		require.Equal(t, "seedance-2.0", body["model_id"])
 		params := body["params"].(map[string]any)
+		require.Len(t, params, 4)
+		require.NotContains(t, params, "fps")
+		require.NotContains(t, params, "extra")
 		require.Equal(t, false, params["generate_audio"])
 		require.Equal(t, float64(4), params["duration"])
 		require.Len(t, r.Header.Get("Idempotency-Key"), 64)
@@ -155,8 +158,8 @@ func TestLegacyVideoCreateReplayAndQuery(t *testing.T) {
 		require.True(t, HTTPUpstreamRedirectsDisabled(r.Context()))
 		return legacyTestResponse(202, "seedance-2.0", "queued", ""), nil
 	}}}
-	body := []byte(`{"model":"alias","prompt":"waves","seconds":4,"resolution":"720p","generate_audio":false}`)
 	for attempt := 0; attempt < 2; attempt++ {
+		body := []byte(fmt.Sprintf(`{"model":"alias","prompt":"waves","seconds":4,"resolution":"720p","generate_audio":false,"fps":%d,"extra":{"value":%d}}`, 24+6*attempt, attempt))
 		req, e := ParseOpenAIVideoRequest(body, "application/json")
 		require.NoError(t, e)
 		c, w := videoTestContext("POST", "/v1/videos", body, "application/json")
@@ -232,7 +235,7 @@ func TestLegacyVideoForwardsSpecificationsWithoutCapabilityConfig(t *testing.T) 
 
 func TestLegacyVideoRejectsUnsupportedBeforeDispatch(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: legacyTestConfig(t)}
-	for _, field := range []string{`"fps":30`, `"seconds":"4"`, `"generate_audio":"false"`, `"output_format":"webm"`, `"output_format":null`, `"size":"1920x1080"`, `"unexpected":"x"`, `"model":"duplicate"`} {
+	for _, field := range []string{`"seconds":"4"`, `"generate_audio":"false"`, `"output_format":"webm"`, `"output_format":null`, `"size":"1920x1080"`, `"model":"duplicate"`, `"fps":24,"fps":30`} {
 		body := []byte(`{"model":"seedance-2.0","prompt":"waves","seconds":4,"resolution":"720p",` + field + `}`)
 		req, e := ParseOpenAIVideoRequest(body, "application/json")
 		require.NoError(t, e)
@@ -245,6 +248,46 @@ func TestLegacyVideoRejectsUnsupportedBeforeDispatch(t *testing.T) {
 		require.NoError(t, err)
 		_, _, err = svc.legacyParams(req, "seedance-2.0", "text-to-video")
 		require.ErrorContains(t, err, "resolution is required")
+	}
+}
+
+func TestLegacyVideoIgnoresUnmappedFieldsBeforeTypeValidation(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	svc := &OpenAIGatewayService{cfg: legacyTestConfig(t)}
+	for _, extra := range []string{
+		`"fps":30`,
+		`"fps":"30"`,
+		`"fps":null`,
+		`"fps":true`,
+		`"fps":{"value":30}`,
+		`"fps":[24,30]`,
+		`"unexpected":{"secret":"private-extra-value"},"fps":30`,
+	} {
+		t.Run(extra, func(t *testing.T) {
+			logs.Reset()
+			body := []byte(`{"model":"seedance-2.0","prompt":"waves","seconds":4,"resolution":"720p",` + extra + `}`)
+			request, err := ParseOpenAIVideoRequest(body, "application/json")
+			require.NoError(t, err)
+			params, image, err := svc.legacyParams(request, "seedance-2.0", "text-to-video")
+			require.NoError(t, err)
+			require.Empty(t, image)
+			require.Equal(t, map[string]any{"duration": 4, "resolution": "720p", "content": []map[string]any{{"type": "text", "text": "waves"}}}, params)
+			var logEntry struct {
+				Message string   `json:"msg"`
+				Fields  []string `json:"fields"`
+			}
+			require.NoError(t, json.Unmarshal(logs.Bytes(), &logEntry))
+			require.Equal(t, "video_legacy.parameters_ignored", logEntry.Message)
+			if strings.Contains(extra, "unexpected") {
+				require.Equal(t, []string{"fps", "unexpected"}, logEntry.Fields)
+			} else {
+				require.Equal(t, []string{"fps"}, logEntry.Fields)
+			}
+			require.NotContains(t, logs.String(), "private-extra-value")
+		})
 	}
 }
 
@@ -271,7 +314,11 @@ func TestLegacyVideoReferenceIsReadableBeforeAcceptanceAndReused(t *testing.T) {
 				Audio bool `json:"generate_audio"`
 			} `json:"params"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		encoded, e := io.ReadAll(r.Body)
+		require.NoError(t, e)
+		require.NotContains(t, string(encoded), `"fps"`)
+		require.NotContains(t, string(encoded), `"extra"`)
+		require.NoError(t, json.Unmarshal(encoded, &body))
 		require.Len(t, body.Params.Content, 2)
 		require.Equal(t, "reference_image", body.Params.Content[1].Role)
 		require.False(t, body.Params.Audio)
@@ -290,6 +337,8 @@ func TestLegacyVideoReferenceIsReadableBeforeAcceptanceAndReused(t *testing.T) {
 		for k, v := range map[string]string{"model": "seedance-2.0", "prompt": "waves", "seconds": "4", "resolution": "720p", "generate_audio": "false"} {
 			require.NoError(t, form.WriteField(k, v))
 		}
+		require.NoError(t, form.WriteField("fps", fmt.Sprint(24+6*i)))
+		require.NoError(t, form.WriteField("extra", fmt.Sprint(i)))
 		part, e := form.CreateFormFile("input_reference", "reference.png")
 		require.NoError(t, e)
 		_, e = part.Write(legacyTestPNG(t))

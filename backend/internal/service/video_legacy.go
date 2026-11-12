@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -108,9 +109,25 @@ func legacyVideoURL(base, task string) (string, error) {
 }
 
 func legacyFields(request *OpenAIVideoRequest) (map[string]string, error) {
-	fields := request.fields
-	if !request.Multipart {
-		fields = make(map[string]string)
+	allowed := map[string]bool{"model": true, "prompt": true, "seconds": true, "resolution": true, "aspect_ratio": true, "generate_audio": true, "size": true, "output_format": true}
+	fields := make(map[string]string)
+	var ignored []string
+	defer func() {
+		if len(ignored) > 0 {
+			sort.Strings(ignored)
+			slog.Info("video_legacy.parameters_ignored", "fields", ignored)
+		}
+	}()
+	if request.Multipart {
+		for name, value := range request.fields {
+			if allowed[name] {
+				fields[name] = value
+			} else {
+				ignored = append(ignored, name)
+			}
+		}
+	} else {
+		seen := make(map[string]bool)
 		decoder := json.NewDecoder(bytes.NewReader(request.Body))
 		if _, err := decoder.Token(); err != nil {
 			return nil, videoError(400, "invalid_request_error", "Invalid JSON")
@@ -124,12 +141,17 @@ func legacyFields(request *OpenAIVideoRequest) (map[string]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("invalid JSON key")
 			}
-			if _, exists := fields[name]; exists {
+			if seen[name] {
 				return nil, videoError(400, "invalid_request_error", "Duplicate field: "+name)
 			}
+			seen[name] = true
 			var raw json.RawMessage
 			if err = decoder.Decode(&raw); err != nil {
 				return nil, err
+			}
+			if !allowed[name] {
+				ignored = append(ignored, name)
+				continue
 			}
 			switch name {
 			case "seconds":
@@ -151,12 +173,6 @@ func legacyFields(request *OpenAIVideoRequest) (map[string]string, error) {
 				}
 				fields[name] = v
 			}
-		}
-	}
-	allowed := map[string]bool{"model": true, "prompt": true, "seconds": true, "resolution": true, "aspect_ratio": true, "generate_audio": true, "size": true, "output_format": true}
-	for name := range fields {
-		if !allowed[name] {
-			return nil, videoError(422, "unsupported_parameter", "Unsupported legacy video parameter: "+name)
 		}
 	}
 	return fields, nil
