@@ -10,25 +10,17 @@ import (
 )
 
 type VideoLegacyConfig struct {
-	ReferenceDir                 string                      `mapstructure:"reference_dir"`
-	PublicBaseURL                string                      `mapstructure:"public_base_url"`
-	SigningKeyID                 string                      `mapstructure:"signing_key_id"`
-	SigningKeys                  map[string]string           `mapstructure:"signing_keys"`
-	MaxStorageBytes              int64                       `mapstructure:"max_storage_bytes"`
-	MinFreeBytes                 int64                       `mapstructure:"min_free_bytes"`
-	UploadConcurrency            int                         `mapstructure:"upload_concurrency"`
-	ReferenceDownloadConcurrency int                         `mapstructure:"reference_download_concurrency"`
-	ReferenceBytesPerSecond      int                         `mapstructure:"reference_bytes_per_second"`
-	DownloadAllowedHosts         []string                    `mapstructure:"download_allowed_hosts"`
-	DownloadTimeoutSeconds       int                         `mapstructure:"download_timeout_seconds"`
-	DownloadIdleSeconds          int                         `mapstructure:"download_idle_seconds"`
-	Models                       map[string]VideoLegacyModel `mapstructure:"models"`
-}
-
-type VideoLegacyModel struct {
-	Resolutions   []string `mapstructure:"resolutions"`
-	Ratios        []string `mapstructure:"ratios"`
-	SupportsAudio bool     `mapstructure:"supports_audio"`
+	ReferenceDir                 string            `mapstructure:"reference_dir"`
+	PublicBaseURL                string            `mapstructure:"public_base_url"`
+	SigningKeyID                 string            `mapstructure:"signing_key_id"`
+	SigningKeys                  map[string]string `mapstructure:"signing_keys"`
+	MaxStorageBytes              int64             `mapstructure:"max_storage_bytes"`
+	MinFreeBytes                 int64             `mapstructure:"min_free_bytes"`
+	UploadConcurrency            int               `mapstructure:"upload_concurrency"`
+	ReferenceDownloadConcurrency int               `mapstructure:"reference_download_concurrency"`
+	ReferenceBytesPerSecond      int               `mapstructure:"reference_bytes_per_second"`
+	DownloadTimeoutSeconds       int               `mapstructure:"download_timeout_seconds"`
+	DownloadIdleSeconds          int               `mapstructure:"download_idle_seconds"`
 }
 
 func setVideoLegacyDefaults() {

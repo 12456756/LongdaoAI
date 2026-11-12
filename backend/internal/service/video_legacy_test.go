@@ -118,7 +118,7 @@ func (v *videoMemoryStore) VideoReferenceTask(_ context.Context, id, task string
 }
 
 func legacyTestConfig(t *testing.T) *config.Config {
-	return &config.Config{VideoLegacy: config.VideoLegacyConfig{ReferenceDir: t.TempDir(), PublicBaseURL: "https://relay.example", SigningKeyID: "v1", SigningKeys: map[string]string{"v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}, MaxStorageBytes: 100 << 20, UploadConcurrency: 2, ReferenceDownloadConcurrency: 2, DownloadAllowedHosts: []string{"cdn.example"}, DownloadTimeoutSeconds: 150, DownloadIdleSeconds: 2, Models: map[string]config.VideoLegacyModel{"seedance-2.0": {Resolutions: []string{"720p"}, Ratios: []string{"16:9"}, SupportsAudio: true}}}}
+	return &config.Config{VideoLegacy: config.VideoLegacyConfig{ReferenceDir: t.TempDir(), PublicBaseURL: "https://relay.example", SigningKeyID: "v1", SigningKeys: map[string]string{"v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}, MaxStorageBytes: 100 << 20, UploadConcurrency: 2, ReferenceDownloadConcurrency: 2, DownloadTimeoutSeconds: 150, DownloadIdleSeconds: 2}}
 }
 func legacyTestAccount() *Account {
 	return &Account{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Credentials: map[string]any{"api_key": "secret-upstream", "base_url": "https://api.example/v1/videos", "video_protocol": VideoProtocolLegacy}}
@@ -191,6 +191,45 @@ func TestLegacyVideoCreateReplayAndQuery(t *testing.T) {
 	require.ErrorIs(t, e, redis.Nil)
 }
 
+func TestLegacyVideoForwardsSpecificationsWithoutCapabilityConfig(t *testing.T) {
+	for _, spec := range []struct {
+		name       string
+		resolution string
+		ratio      string
+		audio      bool
+	}{
+		{name: "current SEP request", resolution: "720p", ratio: "16:9", audio: true},
+		{name: "provider validates other specifications", resolution: "1080p", ratio: "9:16", audio: false},
+	} {
+		t.Run(spec.name, func(t *testing.T) {
+			calls := 0
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, cache: newVideoMemoryStore(), httpUpstream: videoTestUpstream{do: func(r *http.Request) (*http.Response, error) {
+				calls++
+				require.Equal(t, "/v1/video/tasks", r.URL.Path)
+				var body struct {
+					Model  string         `json:"model_id"`
+					Params map[string]any `json:"params"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				require.Equal(t, "seedance-2.0", body.Model)
+				require.Equal(t, spec.resolution, body.Params["resolution"])
+				require.Equal(t, spec.ratio, body.Params["ratio"])
+				require.Equal(t, spec.audio, body.Params["generate_audio"])
+				return legacyTestResponse(http.StatusAccepted, "seedance-2.0", "queued", ""), nil
+			}}}
+			body := []byte(fmt.Sprintf(`{"model":"seedance-2.0","prompt":"waves","seconds":4,"resolution":%q,"aspect_ratio":%q,"generate_audio":%t}`, spec.resolution, spec.ratio, spec.audio))
+			request, err := ParseOpenAIVideoRequest(body, "application/json")
+			require.NoError(t, err)
+			c, w := videoTestContext(http.MethodPost, "/v1/videos", body, "application/json")
+			c.Request.Header.Set("X-Video-Operation", "text-to-video")
+			_, err = svc.ForwardVideo(context.Background(), c, legacyTestAccount(), &APIKey{ID: 8}, request, "", false, "")
+			require.NoError(t, err)
+			require.Equal(t, http.StatusAccepted, w.Code)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
 func TestLegacyVideoRejectsUnsupportedBeforeDispatch(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: legacyTestConfig(t)}
 	for _, field := range []string{`"fps":30`, `"seconds":"4"`, `"generate_audio":"false"`, `"output_format":"webm"`, `"output_format":null`, `"size":"1920x1080"`, `"unexpected":"x"`, `"model":"duplicate"`} {
@@ -199,6 +238,13 @@ func TestLegacyVideoRejectsUnsupportedBeforeDispatch(t *testing.T) {
 		require.NoError(t, e)
 		_, _, e = svc.legacyParams(req, "seedance-2.0", "text-to-video")
 		require.Error(t, e, field)
+	}
+	for _, resolution := range []string{"", " "} {
+		body := []byte(fmt.Sprintf(`{"model":"seedance-2.0","prompt":"waves","seconds":4,"resolution":%q}`, resolution))
+		req, err := ParseOpenAIVideoRequest(body, "application/json")
+		require.NoError(t, err)
+		_, _, err = svc.legacyParams(req, "seedance-2.0", "text-to-video")
+		require.ErrorContains(t, err, "resolution is required")
 	}
 }
 
@@ -315,7 +361,7 @@ func TestLegacyVideoDownloadRefreshNoSecretsAndExactBytes(t *testing.T) {
 		queries++
 		require.Equal(t, "GET", r.Method)
 		require.Equal(t, "Bearer secret-upstream", r.Header.Get("Authorization"))
-		return legacyTestResponse(200, "seedance-2.0", "succeeded", fmt.Sprintf("https://cdn.example/video.mp4?signature=a%%2Bb&attempt=%d", queries)), nil
+		return legacyTestResponse(200, "seedance-2.0", "succeeded", fmt.Sprintf("https://cdn-%d.example/video.mp4?signature=a%%2Bb&attempt=%d", queries, queries)), nil
 	}}}
 	svc.videoDownloadTransport = videoRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		downloads++
@@ -341,14 +387,55 @@ func TestLegacyVideoDownloadRefreshNoSecretsAndExactBytes(t *testing.T) {
 }
 
 func TestVideoDownloadAddressProtection(t *testing.T) {
-	for _, raw := range []string{"http://cdn.example/a", "https://evil.example/a", "https://user:pass@cdn.example/a", "https://cdn.example:8443/a", "https://127.0.0.1/a", "file:///tmp/a"} {
-		_, e := validateVideoDownloadURL(raw, []string{"cdn.example", "127.0.0.1"})
+	for _, raw := range []string{"https://cdn.example/a?signature=a%2Bb", "https://another-cdn.example/b", "https://8.8.8.8/a"} {
+		target, err := validateVideoDownloadURL(raw)
+		require.NoError(t, err, raw)
+		require.Equal(t, raw, target.String())
+	}
+	for _, raw := range []string{"http://cdn.example/a", "https://user:pass@cdn.example/a", "https://cdn.example:8443/a", "https://127.0.0.1/a", "https://10.0.0.1/a", "https://169.254.169.254/a", "https://[::1]/a", "file:///tmp/a"} {
+		_, e := validateVideoDownloadURL(raw)
 		require.Error(t, e, raw)
 	}
 	for _, ip := range []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "::1", "::ffff:127.0.0.1", "fd00::1", "fe80::1", "64:ff9b::a00:1"} {
 		require.False(t, videoPublicIP(netip.MustParseAddr(ip)), ip)
 	}
 	require.True(t, videoPublicIP(netip.MustParseAddr("8.8.8.8")))
+}
+
+func TestVideoDownloadRedirectsWithoutHostConfiguration(t *testing.T) {
+	for _, target := range []string{"https://rotating-cdn.example/video.mp4?signature=a%2Bb", "https://127.0.0.1/video.mp4"} {
+		t.Run(target, func(t *testing.T) {
+			calls := 0
+			svc := &OpenAIGatewayService{videoDownloadTransport: videoRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {target}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+				}
+				require.Equal(t, target, r.URL.String())
+				require.Empty(t, r.Header.Get("Authorization"))
+				require.Empty(t, r.Header.Get("Cookie"))
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("video")), Request: r}, nil
+			})}
+			client, closeClient := svc.legacyDownloadClient()
+			defer closeClient()
+			req, err := http.NewRequest(http.MethodGet, "https://cdn.example/video.mp4", nil)
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer secret")
+			req.Header.Set("Cookie", "session=secret")
+			response, err := client.Do(req)
+			if response != nil {
+				defer response.Body.Close()
+			}
+			if strings.Contains(target, "127.0.0.1") {
+				require.Error(t, err)
+				require.Equal(t, 1, calls)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, response.StatusCode)
+				require.Equal(t, 2, calls)
+			}
+		})
+	}
 }
 
 func TestLegacyVideoContentValidationAndAbort(t *testing.T) {

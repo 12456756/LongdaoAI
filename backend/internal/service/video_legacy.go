@@ -183,12 +183,8 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 	if err != nil || duration < 4 || duration > maxDuration {
 		return nil, nil, videoError(422, "unsupported_duration", "Unsupported legacy video duration")
 	}
-	if s.cfg == nil {
-		return nil, nil, videoError(503, "video_configuration_error", "Legacy video configuration unavailable")
-	}
-	capability, ok := s.cfg.VideoLegacy.Models[model]
-	if !ok || !videoContains(capability.Resolutions, fields["resolution"]) || (fields["aspect_ratio"] != "" && !videoContains(capability.Ratios, fields["aspect_ratio"])) {
-		return nil, nil, videoError(422, "unsupported_spec", "Legacy model resolution or ratio is not configured")
+	if strings.TrimSpace(fields["resolution"]) == "" {
+		return nil, nil, videoError(400, "invalid_request_error", "resolution is required")
 	}
 	if fields["output_format"] != "" && fields["output_format"] != "video/mp4" {
 		return nil, nil, videoError(422, "unsupported_parameter", "Only video/mp4 output is supported")
@@ -223,9 +219,6 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 		if audio != "true" && audio != "false" {
 			return nil, nil, videoError(400, "invalid_request_error", "generate_audio must be true or false")
 		}
-		if audio == "true" && !capability.SupportsAudio {
-			return nil, nil, videoError(422, "unsupported_parameter", "Model audio generation is not configured")
-		}
 		params["generate_audio"] = audio == "true"
 	}
 	var image []byte
@@ -243,14 +236,6 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 		return nil, nil, videoError(400, "invalid_request_error", "X-Video-Operation must be text-to-video or image-to-video")
 	}
 	return params, image, nil
-}
-func videoContains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
 }
 
 type videoSubmission struct {

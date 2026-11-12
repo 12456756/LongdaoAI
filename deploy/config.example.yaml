@@ -874,13 +874,10 @@ video_legacy:
   reference_download_concurrency: 4
   # Zero leaves rate limiting disabled; concurrency and file-size limits still apply.
   reference_bytes_per_second: 0
-  # Exact HTTPS CDN hosts confirmed by the provider; no wildcard or arbitrary proxy.
-  download_allowed_hosts: []
+  # Downloads use upstream-provided HTTPS URLs and reject private network targets.
   download_timeout_seconds: 150
   download_idle_seconds: 20
-  # Configure confirmed resolutions, ratios and audio support for each enabled model.
-  # Model entries accept: resolutions: [...], ratios: [...], supports_audio: true/false.
-  models: {}
+  # The upstream validates model resolutions, aspect ratios and audio support.
 
 # =============================================================================
 # Redis Configuration

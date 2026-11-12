@@ -36,22 +36,12 @@ func videoPublicIP(ip netip.Addr) bool {
 	return true
 }
 
-func validateVideoDownloadURL(raw string, allowed []string) (*url.URL, error) {
+func validateVideoDownloadURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
 		return nil, videoError(502, "video_download_url_rejected", "Unsupported upstream video download address")
 	}
 	host := strings.ToLower(u.Hostname())
-	found := false
-	for _, candidate := range allowed {
-		if host == strings.ToLower(strings.TrimSpace(candidate)) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, videoError(502, "video_download_url_rejected", "Video download host is not configured")
-	}
 	if ip, err := netip.ParseAddr(host); err == nil && !videoPublicIP(ip) {
 		return nil, videoError(502, "video_download_url_rejected", "Video download target is not public")
 	}
@@ -94,7 +84,7 @@ func (s *OpenAIGatewayService) legacyDownloadClient() (*http.Client, func()) {
 		if len(via) > 3 {
 			return fmt.Errorf("too many video redirects")
 		}
-		if _, err := validateVideoDownloadURL(req.URL.String(), s.cfg.VideoLegacy.DownloadAllowedHosts); err != nil {
+		if _, err := validateVideoDownloadURL(req.URL.String()); err != nil {
 			return err
 		}
 		req.Header = make(http.Header)
@@ -150,7 +140,7 @@ func (s *OpenAIGatewayService) downloadLegacyVideo(ctx context.Context, c *gin.C
 		if task.VideoURL == "" {
 			return videoError(503, "video_output_unavailable", "Upstream video output is temporarily unavailable")
 		}
-		target, err := validateVideoDownloadURL(task.VideoURL, s.cfg.VideoLegacy.DownloadAllowedHosts)
+		target, err := validateVideoDownloadURL(task.VideoURL)
 		if err != nil {
 			return err
 		}

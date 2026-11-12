@@ -43,7 +43,7 @@ cat /www/longdao/deploy/last-release.json
 
 - 通过当前 `/www/longdao/deploy/huawei_release.py` 管理的配置，为 blue、green 添加相同挂载：`/www/longdao/media/video-inputs:/app/media/video-inputs`。不要使用本目录旧 Compose 发布。
 - 检查真实应用 UID/GID，图片根目录权限为 `0700`，图片及清单为 `0600`。该目录不放入公开静态目录，不进入每次发布的全量应用文件复制。
-- 在应用私密配置中填写 `video_legacy`，字段见 `deploy/config.example.yaml`。配置实际容量、剩余空间阈值、并发、已确认的模型规格和精确 CDN 域名；未配置的规格和下载域名会被拒绝。
+- 在应用私密配置中填写 `video_legacy`，字段见 `deploy/config.example.yaml`。配置实际容量、剩余空间阈值和并发。模型的分辨率、画幅和音频能力由上游校验，无需配置模型能力白名单。成品下载使用上游返回的 HTTPS 地址，无需配置域名白名单；保留内网地址拦截、超时和文件校验。
 - `signing_keys` 使用独立的至少 32 随机字节的 base64 密钥；两色一致、重启不重生成。轮换后保留旧密钥至旧链接全部到期。不得把实际密钥提交仓库。
 - Caddy 将 `/media/video-inputs/` 代理给应用，不使用 `file_server`，不加 API Key 或浏览器登录校验，不缓存响应；访问日志隐藏签名查询串。应用普通日志只使用资源编号，不记录完整签名 URL。
 - 核对 Caddy 的传输期限和连接关闭行为，匹配应用下载总预算（示例 150 秒）及 SEP 的 180 秒限制；文件 GET 不包含账号密钥，Longdao 不保存成品视频。
