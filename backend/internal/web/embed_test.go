@@ -487,6 +487,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 			"/api/v1/users",
 			"/models",
 			"/v1/models",
+			"/media/video-inputs/vref_0123456789abcdef0123456789abcdef.png",
 			"/v1beta/chat",
 			"/backend-api/codex/responses",
 			"/backend-api/codex/responses/compact",
@@ -512,6 +513,24 @@ func TestFrontendServer_Middleware(t *testing.T) {
 				router.ServeHTTP(w, req)
 
 				assert.True(t, nextCalled, "next handler should be called for API route")
+			})
+		}
+	})
+
+	t.Run("preserves_video_reference_signature_responses", func(t *testing.T) {
+		server, err := NewFrontendServer(&mockSettingsProvider{settings: map[string]string{}})
+		require.NoError(t, err)
+		for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
+			t.Run(method, func(t *testing.T) {
+				router := gin.New()
+				router.Use(server.Middleware())
+				router.Any("/media/video-inputs/:filename", func(c *gin.Context) {
+					c.String(http.StatusForbidden, "invalid signature")
+				})
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, httptest.NewRequest(method, "/media/video-inputs/vref_test.png?expires=1&kid=v1&signature=invalid", nil))
+				assert.Equal(t, http.StatusForbidden, w.Code)
+				assert.NotContains(t, w.Body.String(), "<!doctype html>")
 			})
 		}
 	})

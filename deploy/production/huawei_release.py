@@ -23,6 +23,8 @@ EDGE_DOCKER = ['/usr/bin/docker', '-H', 'unix:///var/run/docker.sock']
 CADDY = Path('/www/sep/deploy/Caddyfile')
 BEGIN, END = '# LONGDAO-AI-BEGIN', '# LONGDAO-AI-END'
 PORTS = {'green': 18080, 'blue': 18081}
+APP_DATA_MOUNT = '/www/longdao/app-data:/app/data'
+VIDEO_REFERENCE_MOUNT = '/www/longdao/media/video-inputs:/app/media/video-inputs'
 REPO = 'ghcr.io/12456756/sub2api'
 VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9]+')
 SEP = ['sep-green-web', 'sep-green-backend', 'sep-caddy',
@@ -60,9 +62,16 @@ def replace_ai(text, block):
 
 def block_color(block):
     matches = re.findall(r'^\s*reverse_proxy 172\.19\.0\.1:(18080|18081)\s*\{', block, re.M)
-    if len(matches) != 1 or 'ai.longdaoec.com {' not in block:
+    expected = 2 if 'images.longdaoec.com {' in block else 1
+    if len(matches) != expected or len(set(matches)) != 1 or 'ai.longdaoec.com {' not in block:
         raise RuntimeError('Unexpected AI upstream configuration')
     return {str(port): color for color, port in PORTS.items()}[matches[0]]
+
+
+def validate_app_mounts(service):
+    allowed = [[APP_DATA_MOUNT], [APP_DATA_MOUNT, VIDEO_REFERENCE_MOUNT]]
+    if service['network_mode'] != 'host' or service['volumes'] not in allowed:
+        raise RuntimeError('Unexpected application mounts/network')
 
 
 def target_service(current, color, image):
@@ -207,8 +216,18 @@ class Release:
                     'SERVER_FRONTEND_URL': 'https://ai.longdaoec.com'}
         if any(str(env.get(k)) != v for k, v in expected.items()):
             raise RuntimeError('Production endpoints differ from expected Huawei configuration')
-        if service['network_mode'] != 'host' or service['volumes'] != ['/www/longdao/app-data:/app/data']:
-            raise RuntimeError('Unexpected application mounts/network')
+        validate_app_mounts(service)
+        if VIDEO_REFERENCE_MOUNT in service['volumes']:
+            reference = ROOT / 'media/video-inputs'
+            if not reference.is_dir() or reference.resolve() != reference:
+                raise RuntimeError('Invalid video reference path')
+            if self.capture(['/usr/bin/findmnt', '-n', '-o', 'UUID', '-T', str(reference)]).strip() != actual_uuid:
+                raise RuntimeError('Video references are not on expected disk')
+            for name, app in self.config['services'].items():
+                if name in ['sub2api-blue', 'sub2api-green']:
+                    validate_app_mounts(app)
+                    if app['volumes'] != service['volumes']:
+                        raise RuntimeError('Application colors must share video reference mounts')
         for name in ['longdao-ai-postgres', 'longdao-ai-redis', 'longdao-ai-' + self.current]:
             self.healthy(name)
         inactive_id = self.capture(DOCKER + ['ps', '-q', '--filter',

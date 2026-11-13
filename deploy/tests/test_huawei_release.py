@@ -62,6 +62,27 @@ class RoutingTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 release.block_color(block)
 
+    def test_image_domain_follows_same_color(self):
+        images = '\nimages.longdaoec.com {\n reverse_proxy 172.19.0.1:18080 {\n }\n}\n'
+        block = BLOCK.replace('# LONGDAO-AI-END', images + '# LONGDAO-AI-END')
+        self.assertEqual(release.block_color(block), 'green')
+        self.assertEqual(release.block_color(block.replace(':18080', ':18081')), 'blue')
+        mixed = block.replace(images, images.replace(':18080', ':18081'))
+        with self.assertRaises(RuntimeError):
+            release.block_color(mixed)
+
+    def test_only_expected_persistent_mounts_allowed(self):
+        release.validate_app_mounts(SERVICE)
+        media = copy.deepcopy(SERVICE)
+        media['volumes'].append(release.VIDEO_REFERENCE_MOUNT)
+        release.validate_app_mounts(media)
+        for volumes in [[release.VIDEO_REFERENCE_MOUNT],
+                        [release.APP_DATA_MOUNT, '/tmp:/app/media/video-inputs'],
+                        media['volumes'] + ['/etc:/host']]:
+            media['volumes'] = volumes
+            with self.assertRaises(RuntimeError):
+                release.validate_app_mounts(media)
+
     def test_release_checks_only_new_public_domain(self):
         source = Path(release.__file__).read_text()
         self.assertNotIn('https://longdaoai.cn', source)

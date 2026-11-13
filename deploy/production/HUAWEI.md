@@ -1,6 +1,6 @@
 # 华为云生产发布
 
-当前正式服务器为 `121.37.128.126`，唯一正式域名为 `ai.longdaoec.com`。旧域名 `longdaoai.cn` 已从运行链路移除，不再作为兼容入口。不要在新机运行本目录旧的 `deploy.sh` / `switch.sh` / `docker-compose.yml`；这些属于原服务器部署结构。
+当前正式服务器为 `121.37.128.126`，主服务域名为 `ai.longdaoec.com`，视频参考图片域名为 `images.longdaoec.com`。旧域名 `longdaoai.cn` 已从运行链路移除，不再作为兼容入口。不要在新机运行本目录旧的 `deploy.sh` / `switch.sh` / `docker-compose.yml`；这些属于原服务器部署结构。
 
 2026-11-07 已完成运行时域名切换：SEP 的 `SUB2API_BASE_URL` 与 `MEDIA_VIDEO_BASE_URL`、龙道 OAuth 回调、支付宝/易支付回调均使用 `ai.longdaoec.com`；新机 Caddy 不再信任旧服务器 IP。历史订单中的旧地址保留作审计记录，不作为当前配置。
 
@@ -39,13 +39,15 @@ cat /www/longdao/deploy/last-release.json
 
 ## Seedance 旧版视频适配的部署配置
 
-应用代码保留 `/v1/videos`，账号凭据 `video_protocol=naoshengyun_legacy` 才启用旧协议。已有账号缺省为 `openai_videos`。以下配置对应开发方案，不代表服务器已经完成配置。
+应用代码保留 `/v1/videos`，账号凭据 `video_protocol=naoshengyun_legacy` 才启用旧协议。已有账号缺省为 `openai_videos`。服务器的参考图片配置使用以下约定；启用上游账号仍需单独核对协议、权限及报价。
 
 - 通过当前 `/www/longdao/deploy/huawei_release.py` 管理的配置，为 blue、green 添加相同挂载：`/www/longdao/media/video-inputs:/app/media/video-inputs`。不要使用本目录旧 Compose 发布。
 - 检查真实应用 UID/GID，图片根目录权限为 `0700`，图片及清单为 `0600`。该目录不放入公开静态目录，不进入每次发布的全量应用文件复制。
 - 在应用私密配置中填写 `video_legacy`，字段见 `deploy/config.example.yaml`。配置实际容量、剩余空间阈值和并发。模型的分辨率、画幅和音频能力由上游校验，无需配置模型能力白名单。成品下载使用上游返回的 HTTPS 地址，无需配置域名白名单；保留内网地址拦截、超时和文件校验。
 - `signing_keys` 使用独立的至少 32 随机字节的 base64 密钥；两色一致、重启不重生成。轮换后保留旧密钥至旧链接全部到期。不得把实际密钥提交仓库。
 - Caddy 将 `/media/video-inputs/` 代理给应用，不使用 `file_server`，不加 API Key 或浏览器登录校验，不缓存响应；访问日志隐藏签名查询串。应用普通日志只使用资源编号，不记录完整签名 URL。
+- `public_base_url` 使用 `https://images.longdaoec.com`。图片域名仅代理参考图片路径，其余路径返回 404；Caddy 自动管理 HTTPS 证书。图片站点与主站均放在 `LONGDAO-AI` 标记块内，两者指向同一活动色，发布器同时切换和回退。
+- 图片存储上限为 20 GiB，磁盘预留空间为 20 GiB；上传并发为 2、参考图片下载并发为 4。图片及签名有效期为 7 天，应用首次初始化图片服务时扫描清理，之后每小时清理。
 - 核对 Caddy 的传输期限和连接关闭行为，匹配应用下载总预算（示例 150 秒）及 SEP 的 180 秒限制；文件 GET 不包含账号密钥，Longdao 不保存成品视频。
 - 非付费检查包括外网 GET/HEAD 读取签名参考图、两色挂载及密钥一致、重启后可读、到期拒绝和清理。任务、图片、幂等记录继续使用原 Redis，期限固定 7 天。SEP 原 24 小时成品缓存不变。
 ## GitHub production Environment
