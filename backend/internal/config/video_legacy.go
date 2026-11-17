@@ -26,7 +26,7 @@ type VideoLegacyConfig struct {
 func setVideoLegacyDefaults() {
 	viper.SetDefault("video_legacy.reference_dir", "/app/media/video-inputs")
 	viper.SetDefault("video_legacy.upload_concurrency", 2)
-	viper.SetDefault("video_legacy.reference_download_concurrency", 4)
+	viper.SetDefault("video_legacy.reference_download_concurrency", 18)
 	viper.SetDefault("video_legacy.download_timeout_seconds", 150)
 	viper.SetDefault("video_legacy.download_idle_seconds", 20)
 }

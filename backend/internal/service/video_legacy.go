@@ -178,7 +178,7 @@ func legacyFields(request *OpenAIVideoRequest) (map[string]string, error) {
 	return fields, nil
 }
 
-func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, operation string) (map[string]any, []byte, error) {
+func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, operation string) (map[string]any, []videoReferenceInput, error) {
 	fields, err := legacyFields(request)
 	if err != nil {
 		return nil, nil, err
@@ -237,33 +237,45 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 		}
 		params["generate_audio"] = audio == "true"
 	}
-	var image []byte
-	switch operation {
-	case "text-to-video":
-		if len(request.moderation.Uploads) != 0 {
-			return nil, nil, videoError(400, "invalid_request_error", "Text-to-video cannot include an image")
-		}
-	case "image-to-video":
-		if len(request.moderation.Uploads) != 1 {
-			return nil, nil, videoError(400, "invalid_request_error", "Exactly one input_reference PNG is required")
-		}
-		image = request.moderation.Uploads[0].Data
-	default:
-		return nil, nil, videoError(400, "invalid_request_error", "X-Video-Operation must be text-to-video or image-to-video")
+	if err := request.ValidateVideoReferences(VideoProtocolLegacy, operation); err != nil {
+		return nil, nil, err
 	}
-	return params, image, nil
+	return params, request.legacyImages, nil
 }
 
 type videoSubmission struct {
-	SchemaVersion    int                `json:"schema_version"`
-	SemanticSHA256   string             `json:"semantic_sha256"`
-	AccountID        int64              `json:"account_id"`
-	Protocol         string             `json:"protocol"`
-	State            string             `json:"state"`
-	ReferenceAssetID string             `json:"reference_asset_id,omitempty"`
-	BillingRequestID string             `json:"billing_request_id"`
-	Task             *VideoTaskMetadata `json:"task,omitempty"`
-	ExpiresAt        int64              `json:"expires_at"`
+	SchemaVersion     int                `json:"schema_version"`
+	SemanticSHA256    string             `json:"semantic_sha256"`
+	AccountID         int64              `json:"account_id"`
+	Protocol          string             `json:"protocol"`
+	State             string             `json:"state"`
+	ReferenceAssetID  string             `json:"reference_asset_id,omitempty"`
+	ReferenceAssetIDs []string           `json:"reference_asset_ids,omitempty"`
+	BillingRequestID  string             `json:"billing_request_id"`
+	Task              *VideoTaskMetadata `json:"task,omitempty"`
+	ExpiresAt         int64              `json:"expires_at"`
+}
+
+func legacyVideoSemanticHash(model, upstreamModel string, params map[string]any, images []videoReferenceInput) string {
+	semantic := map[string]any{"model": model, "params": params}
+	if len(images) <= 1 {
+		if len(images) == 1 {
+			semantic["image_sha256"] = images[0].sha256
+		} else {
+			digest := sha256.Sum256(nil)
+			semantic["image_sha256"] = hex.EncodeToString(digest[:])
+		}
+	} else {
+		digests := make([]string, 0, len(images))
+		for _, image := range images {
+			digests = append(digests, image.sha256)
+		}
+		semantic["image_sha256s"] = digests
+		semantic["upstream_model"] = upstreamModel
+	}
+	encoded, _ := json.Marshal(semantic)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Account, task string, body []byte, idem string) (*legacyVideoTask, error) {
@@ -459,17 +471,16 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		return nil, e
 	}
 	upstreamModel := resolveOpenAIForwardModel(account, request.Model, mappedModel)
-	params, image, e := s.legacyParams(request, upstreamModel, c.GetHeader("X-Video-Operation"))
+	params, images, e := s.legacyParams(request, upstreamModel, c.GetHeader("X-Video-Operation"))
 	if e != nil {
 		return nil, e
 	}
-	digestImage := sha256.Sum256(image)
-	semantic, _ := json.Marshal(map[string]any{"model": request.Model, "params": params, "image_sha256": hex.EncodeToString(digestImage[:])})
-	digest := sha256.Sum256(semantic)
-	submission := &videoSubmission{SchemaVersion: 1, SemanticSHA256: hex.EncodeToString(digest[:]), AccountID: account.ID, Protocol: VideoProtocolLegacy, State: "preparing", BillingRequestID: resolveUsageBillingRequestID(ctx, ""), ExpiresAt: time.Now().Unix() + 604800}
+	submission := &videoSubmission{SchemaVersion: 1, SemanticSHA256: legacyVideoSemanticHash(request.Model, upstreamModel, params, images), AccountID: account.ID, Protocol: VideoProtocolLegacy, State: "preparing", BillingRequestID: resolveUsageBillingRequestID(ctx, ""), ExpiresAt: time.Now().Unix() + 604800}
 	idem := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	submissionKey := ""
 	upstreamIdem := ""
+	var reservation []byte
+	dispatched := false
 	if idem != "" {
 		if len(idem) > 255 {
 			return nil, videoError(400, "invalid_request_error", "Idempotency-Key is too long")
@@ -480,12 +491,12 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		encoded, _ := json.Marshal(submission)
 		created, e := store.VideoSave(ctx, submissionKey, encoded, time.Unix(submission.ExpiresAt, 0), true)
 		if e != nil {
-			return nil, e
+			return nil, videoError(503, "video_submission_unavailable", "Create video submission in Redis: "+e.Error())
 		}
 		if !created {
 			encoded, e = store.VideoLoad(ctx, submissionKey)
 			if e != nil {
-				return nil, e
+				return nil, videoError(503, "video_submission_unavailable", "Read video submission from Redis: "+e.Error())
 			}
 			var previous videoSubmission
 			if json.Unmarshal(encoded, &previous) != nil || previous.SchemaVersion != 1 {
@@ -498,7 +509,7 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 				return nil, videoError(409, "submission_unknown", "Original video submission is pending confirmation")
 			}
 			if e = store.VideoBind(ctx, previous.Task); e != nil {
-				return nil, e
+				return nil, videoError(503, "video_submission_unavailable", "Restore video task binding in Redis: "+e.Error())
 			}
 			if strings.HasPrefix(previous.BillingRequestID, "client:") {
 				c.Header("X-Client-Request-ID", strings.TrimPrefix(previous.BillingRequestID, "client:"))
@@ -506,6 +517,16 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 			c.JSON(202, normalizedVideoTask{Object: "video", ID: previous.Task.TaskID, Model: previous.Task.RequestedModel, Status: previous.Task.LastStatus})
 			return nil, nil
 		}
+		reservation = encoded
+		defer func() {
+			if !dispatched {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+				defer cancel()
+				if e := store.VideoDeleteIfEqual(cleanupCtx, submissionKey, reservation); e != nil {
+					slog.Warn("video_legacy.reservation_cleanup_failed", "billing_request_id", submission.BillingRequestID, "reason", e.Error())
+				}
+			}
+		}()
 	}
 	saveSubmission := func() error {
 		if submissionKey == "" {
@@ -523,30 +544,44 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		}
 		return nil
 	}
-	if image != nil {
+	if len(images) != 0 {
 		runtime, e := s.videoReferences()
 		if e != nil {
-			return nil, e
+			return nil, videoError(503, "video_reference_storage_error", "Initialize video reference storage: "+e.Error())
 		}
-		reference, e := runtime.save(ctx, key, image)
+		references, e := runtime.saveBatch(ctx, key, images)
 		if e != nil {
 			return nil, e
 		}
-		submission.ReferenceAssetID = reference.AssetID
-		params["content"] = append(params["content"].([]map[string]any), map[string]any{"type": "image_url", "image_url": map[string]string{"url": reference.SignedURL}, "role": "reference_image"})
+		defer func() {
+			if submission.State == "preparing" {
+				runtime.removeReferences(references)
+			}
+		}()
+		items := params["content"].([]map[string]any)
+		for _, ref := range references {
+			submission.ReferenceAssetIDs = append(submission.ReferenceAssetIDs, ref.AssetID)
+			items = append(items, map[string]any{"type": "image_url", "image_url": map[string]string{"url": ref.SignedURL}, "role": "reference_image"})
+		}
+		if len(references) == 1 {
+			submission.ReferenceAssetID = references[0].AssetID
+		}
+		params["content"] = items
 	}
 	body, e := json.Marshal(map[string]any{"model_id": upstreamModel, "params": params})
 	if e != nil {
 		return nil, e
 	}
 	if len(body) > 65536 {
-		return nil, videoError(413, "invalid_request_error", "Legacy video request exceeds 64 KiB")
+		return nil, videoError(413, "invalid_request_error", fmt.Sprintf("Legacy video JSON size %d bytes exceeds limit 65536 bytes", len(body)))
 	}
 	submission.State = "dispatching"
 	if e = saveSubmission(); e != nil {
-		return nil, e
+		submission.State = "preparing"
+		return nil, videoError(503, "video_submission_unavailable", "Mark video submission as dispatching in Redis: "+e.Error())
 	}
 	started := time.Now()
+	dispatched = true
 	task, e := s.legacyRequest(ctx, account, "", body, upstreamIdem)
 	if e != nil {
 		submission.State = "unknown"
@@ -560,7 +595,7 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 	}
 	status, _ := legacyStatus(task)
 	now := time.Now().Unix()
-	meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, ReferenceAssetID: submission.ReferenceAssetID, BillingRequestID: submission.BillingRequestID, LastStatus: status, BoundAt: now, ExpiresAt: now + 604800}
+	meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, ReferenceAssetID: submission.ReferenceAssetID, ReferenceAssetIDs: submission.ReferenceAssetIDs, BillingRequestID: submission.BillingRequestID, LastStatus: status, BoundAt: now, ExpiresAt: now + 604800}
 	submission.Task = meta
 	submission.State = "accepted"
 	bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -577,9 +612,9 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 	if e != nil {
 		slog.Warn("video_legacy.accepted_binding_failed", "task_id", task.ID, "account_id", account.ID)
 	}
-	if meta.ReferenceAssetID != "" {
-		if e = store.VideoReferenceTask(bindCtx, meta.ReferenceAssetID, task.ID); e != nil {
-			slog.Warn("video_legacy.reference_task_update_failed", "task_id", task.ID)
+	for _, asset := range meta.referenceAssets() {
+		if e = store.VideoReferenceTask(bindCtx, asset, task.ID); e != nil {
+			slog.Warn("video_legacy.reference_task_update_failed", "task_id", task.ID, "asset_id", asset, "reason", e.Error())
 		}
 	}
 	c.JSON(202, normalizedVideoTask{Object: "video", ID: task.ID, Model: request.Model, Status: status})

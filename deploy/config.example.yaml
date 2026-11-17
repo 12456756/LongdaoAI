@@ -871,7 +871,7 @@ video_legacy:
   max_storage_bytes: 0
   min_free_bytes: 0
   upload_concurrency: 2
-  reference_download_concurrency: 4
+  reference_download_concurrency: 18
   # Zero leaves rate limiting disabled; concurrency and file-size limits still apply.
   reference_bytes_per_second: 0
   # Downloads use upstream-provided HTTPS URLs and reject private network targets.

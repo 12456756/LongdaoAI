@@ -44,6 +44,7 @@ cat /www/longdao/deploy/last-release.json
 - 通过当前 `/www/longdao/deploy/huawei_release.py` 管理的配置，为 blue、green 添加相同挂载：`/www/longdao/media/video-inputs:/app/media/video-inputs`。不要使用本目录旧 Compose 发布。
 - 检查真实应用 UID/GID，图片根目录权限为 `0700`，图片及清单为 `0600`。该目录不放入公开静态目录，不进入每次发布的全量应用文件复制。
 - 在应用私密配置中填写 `video_legacy`，字段见 `deploy/config.example.yaml`。配置实际容量、剩余空间阈值和并发。模型的分辨率、画幅和音频能力由上游校验，无需配置模型能力白名单。成品下载使用上游返回的 HTTPS 地址，无需配置域名白名单；保留内网地址拦截、超时和文件校验。
+- Seedance 2.0 和 2.5 多参考图统一最多 9 张、单张 10 MiB、图片合计 90 MiB。上线时确认 `/v1/videos` 的入口请求体限制至少为 92 MiB（96,468,992 字节）。上传并发保持 2；参考图片读取并发的默认值是 18，已有显式 `reference_download_concurrency: 4` 的部署需单独修改配置才会生效。
 - `signing_keys` 使用独立的至少 32 随机字节的 base64 密钥；两色一致、重启不重生成。轮换后保留旧密钥至旧链接全部到期。不得把实际密钥提交仓库。
 - Caddy 将 `/media/video-inputs/` 代理给应用，不使用 `file_server`，不加 API Key 或浏览器登录校验，不缓存响应；访问日志隐藏签名查询串。应用普通日志只使用资源编号，不记录完整签名 URL。
 - `public_base_url` 使用 `https://images.longdaoec.com`。图片域名仅代理参考图片路径，其余路径返回 404；Caddy 自动管理 HTTPS 证书。图片站点与主站均放在 `LONGDAO-AI` 标记块内，两者指向同一活动色，发布器同时切换和回退。

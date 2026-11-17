@@ -36,6 +36,10 @@ func (c *gatewayCache) VideoReplace(ctx context.Context, key string, data []byte
 	return result == "OK", err
 }
 
+func (c *gatewayCache) VideoDeleteIfEqual(ctx context.Context, key string, data []byte) error {
+	return c.rdb.Eval(ctx, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{key}, data).Err()
+}
+
 func (c *gatewayCache) VideoBind(ctx context.Context, m *service.VideoTaskMetadata) error {
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -113,4 +117,8 @@ func (c *gatewayCache) VideoReferenceTask(ctx context.Context, asset, task strin
 	encoded, _ := json.Marshal(task)
 	return c.rdb.Eval(ctx, `if redis.call('EXISTS',KEYS[1])==0 then return 0 end
  redis.call('HSET',KEYS[1],'task_id',ARGV[1]); return 1`, []string{"video:reference:" + asset}, string(encoded)).Err()
+}
+
+func (c *gatewayCache) VideoDeleteReference(ctx context.Context, asset string) error {
+	return c.rdb.Del(ctx, "video:reference:"+asset).Err()
 }

@@ -29,16 +29,24 @@ var ErrVideoTaskNotFound = errors.New("video task not found")
 
 // OpenAIVideoRequest retains provider-specific fields and uploaded reference images.
 type OpenAIVideoRequest struct {
-	Body        []byte
-	ContentType string
-	Multipart   bool
-	Model       string
-	Prompt      string
-	Seconds     int
-	Resolution  string
-	fields      map[string]string
-	otherFiles  int
-	moderation  GrokMediaRequestInfo
+	Body                  []byte
+	ContentType           string
+	Multipart             bool
+	Model                 string
+	Prompt                string
+	Seconds               int
+	Resolution            string
+	tempDir               string
+	bodyPath              string
+	bodyHash              string
+	uploadPaths           []string
+	spooledReferenceCount int
+	wireBytes             int64
+	legacyImages          []videoReferenceInput
+	legacyValidated       bool
+	fields                map[string]string
+	otherFiles            int
+	moderation            GrokMediaRequestInfo
 }
 
 func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoRequest, error) {
@@ -124,6 +132,10 @@ func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoReque
 	default:
 		return nil, fmt.Errorf("Content-Type must be application/json or multipart/form-data")
 	}
+	return finishOpenAIVideoRequest(r, fields)
+}
+
+func finishOpenAIVideoRequest(r *OpenAIVideoRequest, fields map[string]string) (*OpenAIVideoRequest, error) {
 	r.Model = strings.TrimSpace(fields["model"])
 	r.fields = fields
 	r.Prompt = strings.TrimSpace(fields["prompt"])
@@ -134,6 +146,7 @@ func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoReque
 	}
 	seconds := firstNonEmptyString(fields["seconds"], fields["duration"])
 	if seconds != "" {
+		var err error
 		r.Seconds, err = strconv.Atoi(seconds)
 		if err != nil || r.Seconds <= 0 {
 			return nil, fmt.Errorf("seconds or duration must be a positive integer")

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -10,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image/png"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -29,7 +27,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const VideoUploadMaxBytes int64 = 12 << 20
+const VideoUploadMaxBytes int64 = 92 << 20
 const videoPNGMaxBytes = 10 << 20
 
 var videoAssetPattern = regexp.MustCompile(`^vref_[a-f0-9]{32}$`)
@@ -110,7 +108,7 @@ func (s *OpenAIGatewayService) AcquireVideoUpload(ctx context.Context) (func(), 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
-		return nil, fmt.Errorf("video upload concurrency limit reached")
+		return nil, fmt.Errorf("video upload concurrency limit reached (%d)", cap(s.videoUploads))
 	}
 }
 
@@ -135,32 +133,34 @@ func (r *videoReferenceRuntime) sign(asset string, expires int64, kid string) st
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func (r *videoReferenceRuntime) save(ctx context.Context, key *APIKey, data []byte) (reference *VideoReference, saveErr error) {
+func (r *videoReferenceRuntime) save(ctx context.Context, key *APIKey, data []byte) (*VideoReference, error) {
+	image := videoReferenceInput{data: data}
+	if err := image.validate(1); err != nil {
+		return nil, err
+	}
+	refs, err := r.saveBatch(ctx, key, []videoReferenceInput{image})
+	if err != nil {
+		return nil, err
+	}
+	return refs[0], nil
+}
+
+func (r *videoReferenceRuntime) saveBatch(ctx context.Context, key *APIKey, images []videoReferenceInput) (references []*VideoReference, saveErr error) {
 	defer func() {
 		if saveErr != nil {
 			r.uploadFailures.Add(1)
-			slog.Warn("video_reference.upload_failed", "api_key_id", key.ID)
+			slog.Warn("video_reference.upload_failed", "api_key_id", key.ID, "reason", saveErr.Error())
 		}
 	}()
-	if len(data) == 0 || len(data) > videoPNGMaxBytes {
-		return nil, videoError(400, "invalid_request_error", "input_reference must be a PNG no larger than 10 MiB")
-	}
 	select {
 	case r.uploads <- struct{}{}:
 		defer func() { <-r.uploads }()
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	dimensions, err := png.DecodeConfig(bytes.NewReader(data))
-	if err != nil || dimensions.Width < 1 || dimensions.Height < 1 || dimensions.Width > 4096 || dimensions.Height > 4096 {
-		return nil, videoError(400, "invalid_request_error", "input_reference must be a valid PNG at most 4096x4096")
-	}
-	if _, err = png.Decode(bytes.NewReader(data)); err != nil {
-		return nil, videoError(400, "invalid_request_error", "input_reference PNG decoding failed")
-	}
 	unlock, err := videoDiskLock(ctx, r.cfg.ReferenceDir)
 	if err != nil {
-		return nil, fmt.Errorf("video reference storage busy")
+		return nil, videoError(503, "video_reference_storage_error", "Lock reference storage: "+err.Error())
 	}
 	defer unlock()
 	var used int64
@@ -181,23 +181,59 @@ func (r *videoReferenceRuntime) save(ctx context.Context, key *APIKey, data []by
 		return ctx.Err()
 	})
 	if err != nil {
-		return nil, fmt.Errorf("video reference capacity scan failed")
+		return nil, videoError(503, "video_reference_storage_error", "Scan reference storage: "+err.Error())
 	}
-	required := int64(len(data)) + 4096
+	var required int64
+	for _, image := range images {
+		required += image.size + 4096
+	}
 	free, err := videoDiskFree(r.cfg.ReferenceDir)
-	if err != nil || used+required > r.cfg.MaxStorageBytes || free < r.cfg.MinFreeBytes+required {
+	if err != nil {
+		return nil, videoError(503, "video_reference_storage_error", "Read reference disk capacity: "+err.Error())
+	}
+	if used+required > r.cfg.MaxStorageBytes || free < r.cfg.MinFreeBytes+required {
 		slog.Warn("video_reference.capacity_exceeded", "bytes", used)
-		return nil, fmt.Errorf("video reference storage capacity exceeded")
+		return nil, videoError(503, "video_reference_capacity_exceeded", fmt.Sprintf("Reference storage capacity: used=%d required=%d limit=%d free=%d minimum_free_after_save=%d bytes", used, required, r.cfg.MaxStorageBytes, free, r.cfg.MinFreeBytes))
 	}
 	now := r.now().UTC()
+	defer func() {
+		if saveErr != nil {
+			r.removeReferences(references)
+		}
+	}()
+	for i, image := range images {
+		ref, e := r.saveImage(ctx, key, image, now)
+		if e != nil {
+			return references, videoError(503, "video_reference_storage_error", fmt.Sprintf("Save input_reference[%d]: %s", i+1, e))
+		}
+		references = append(references, ref)
+	}
+	return references, nil
+}
+
+// Called only for this request's references before a paid POST could reach upstream.
+func (r *videoReferenceRuntime) removeReferences(references []*VideoReference) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, ref := range references {
+		if err := r.store.VideoDeleteReference(ctx, ref.AssetID); err != nil {
+			slog.Warn("video_reference.rollback_redis_failed", "asset_id", ref.AssetID, "reason", err.Error())
+		}
+		if err := os.RemoveAll(filepath.Join(r.cfg.ReferenceDir, filepath.Dir(filepath.FromSlash(ref.RelativePath)))); err != nil {
+			slog.Warn("video_reference.rollback_file_failed", "asset_id", ref.AssetID, "reason", err.Error())
+		}
+	}
+}
+
+func (r *videoReferenceRuntime) saveImage(ctx context.Context, key *APIKey, image videoReferenceInput, now time.Time) (*VideoReference, error) {
 	asset := "vref_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	parent := filepath.Join(r.cfg.ReferenceDir, now.Format("2006/01/02"))
-	if err = os.MkdirAll(parent, 0700); err != nil {
-		return nil, fmt.Errorf("create video reference date directory")
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return nil, fmt.Errorf("create video reference date directory: %w", err)
 	}
 	staging := filepath.Join(parent, ".upload_"+asset)
-	if err = os.Mkdir(staging, 0700); err != nil {
-		return nil, fmt.Errorf("create video reference staging")
+	if err := os.Mkdir(staging, 0700); err != nil {
+		return nil, fmt.Errorf("create video reference staging: %w", err)
 	}
 	published := false
 	defer func() {
@@ -205,11 +241,30 @@ func (r *videoReferenceRuntime) save(ctx context.Context, key *APIKey, data []by
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	digest := sha256.Sum256(data)
-	ref := &VideoReference{SchemaVersion: 1, AssetID: asset, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), RelativePath: filepath.ToSlash(filepath.Join(now.Format("2006/01/02"), asset, "input.png")), MimeType: "image/png", ByteLength: int64(len(data)), SHA256: hex.EncodeToString(digest[:]), Width: dimensions.Width, Height: dimensions.Height, CreatedAt: now.Unix(), ExpiresAt: now.Unix() + 604800, SigningKeyID: r.cfg.SigningKeyID}
+	ref := &VideoReference{SchemaVersion: 1, AssetID: asset, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), RelativePath: filepath.ToSlash(filepath.Join(now.Format("2006/01/02"), asset, "input.png")), MimeType: "image/png", ByteLength: image.size, SHA256: image.sha256, Width: image.width, Height: image.height, CreatedAt: now.Unix(), ExpiresAt: now.Unix() + 604800, SigningKeyID: r.cfg.SigningKeyID}
 	ref.SignedURL = r.unsigned(asset, ref.ExpiresAt, ref.SigningKeyID) + "&signature=" + r.sign(asset, ref.ExpiresAt, ref.SigningKeyID)
-	if err = writeVideoFile(filepath.Join(staging, "input.png"), data); err != nil {
+	input, err := image.open()
+	if err != nil {
+		return nil, fmt.Errorf("open reference image: %w", err)
+	}
+	defer input.Close()
+	output, err := os.OpenFile(filepath.Join(staging, "input.png"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("create reference image: %w", err)
+	}
+	written, err := io.Copy(output, input)
+	if err == nil {
+		err = output.Sync()
+	}
+	closeErr := output.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		return nil, err
+	}
+	if written != image.size {
+		return nil, fmt.Errorf("reference image byte length changed: expected=%d actual=%d", image.size, written)
 	}
 	manifest, _ := json.Marshal(videoReferenceManifest{1, asset, ref.CreatedAt, ref.ExpiresAt, ref.SHA256, ref.ByteLength})
 	if err = writeVideoFile(filepath.Join(staging, "manifest.json"), manifest); err != nil {
@@ -225,7 +280,12 @@ func (r *videoReferenceRuntime) save(ctx context.Context, key *APIKey, data []by
 	published = true
 	if err = r.store.VideoSaveReference(ctx, ref); err != nil {
 		_ = os.RemoveAll(final)
-		return nil, fmt.Errorf("register video reference")
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if rollbackErr := r.store.VideoDeleteReference(rollbackCtx, ref.AssetID); rollbackErr != nil {
+			slog.Warn("video_reference.rollback_redis_failed", "asset_id", ref.AssetID, "reason", rollbackErr.Error())
+		}
+		return nil, fmt.Errorf("register video reference in Redis: %w", err)
 	}
 	slog.Info("video_reference.saved", "asset_id", asset, "bytes", ref.ByteLength, "expires_at", ref.ExpiresAt)
 	return ref, nil
@@ -307,7 +367,7 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 	case r.downloads <- struct{}{}:
 		defer func() { <-r.downloads }()
 	default:
-		readError(429, "reference download busy")
+		readError(429, fmt.Sprintf("reference download concurrency limit reached (%d)", cap(r.downloads)))
 		return
 	}
 	root, err := os.OpenRoot(r.cfg.ReferenceDir)

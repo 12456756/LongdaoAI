@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"strconv"
@@ -63,37 +64,41 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 				h.errorResponse(c, http.StatusUnsupportedMediaType, "unsupported_encoding", "Compressed video uploads are not supported")
 				return
 			}
+			if size := c.Request.ContentLength; size > service.VideoUploadMaxBytes {
+				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", fmt.Sprintf("Video multipart size %d bytes exceeds limit %d bytes", size, service.VideoUploadMaxBytes))
+				return
+			}
 			release, slotErr := h.gatewayService.AcquireVideoUpload(ctx)
 			if slotErr != nil {
-				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Video upload concurrency limit reached")
+				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", slotErr.Error())
 				return
 			}
 			defer release()
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.VideoUploadMaxBytes)
 		}
-		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		if mediaType == "multipart/form-data" {
+			request, err = service.ParseOpenAIVideoUpload(c.Request.Body, c.GetHeader("Content-Type"))
+		} else {
+			body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		}
 		if err != nil {
 			if maxErr, ok := extractMaxBytesError(err); ok {
 				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			} else {
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+				status, code, message := service.VideoRequestErrorDetails(err)
+				h.errorResponse(c, status, code, message)
 			}
 			return
 		}
-		request, err = service.ParseOpenAIVideoRequest(body, c.GetHeader("Content-Type"))
+		if request == nil {
+			request, err = service.ParseOpenAIVideoRequest(body, c.GetHeader("Content-Type"))
+		}
 		if err != nil {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}
+		defer request.Close()
 		requestModel = request.Model
-		// Reuse the media moderation policy for prompts and reference images.
-		if moderationBody := request.ModerationBody(); len(moderationBody) > 0 {
-			decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
-			if decision != nil && decision.Blocked {
-				h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
-				return
-			}
-		}
 		channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, requestModel)
 	}
 	setOpsRequestContext(c, requestModel, false)
@@ -159,6 +164,45 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 	}
 	var frozenVideoBilling *service.FrozenVideoBilling
 	if create {
+		legacy := account.VideoProtocol() == service.VideoProtocolLegacy
+		var err error
+		if legacy {
+			err = request.ValidateVideoReferences(service.VideoProtocolLegacy, c.GetHeader("X-Video-Operation"))
+		} else {
+			err = request.PrepareNativeVideoUpload()
+		}
+		if err != nil {
+			status, code, message := service.VideoRequestErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
+		blocked := false
+		moderate := func(moderationBody []byte) bool {
+			if len(moderationBody) == 0 {
+				return true
+			}
+			decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
+			if decision != nil && decision.Blocked {
+				blocked = true
+				h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+			}
+			return !blocked
+		}
+		if h.contentModerationService != nil {
+			if legacy {
+				err = request.VisitModerationBodies(moderate)
+			} else {
+				moderate(request.ModerationBody())
+			}
+		}
+		if err != nil {
+			status, code, message := service.VideoRequestErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
+		if blocked {
+			return
+		}
 		var verified bool
 		frozenVideoBilling, verified = h.prepareVideoBilling(c, apiKey, account, request)
 		if !verified {
@@ -189,13 +233,14 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 	userAgent, clientIP := c.GetHeader("User-Agent"), ip.GetClientIP(c)
 	inboundEndpoint := GetInboundEndpoint(c)
 	quotaPlatform := service.QuotaPlatform(ctx, apiKey)
+	payloadHash := request.PayloadHash()
 	h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
 		if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 			Result: result, APIKey: apiKey, User: apiKey.User, Account: account,
 			Subscription: subscription, APIKeyService: h.apiKeyService,
 			InboundEndpoint: inboundEndpoint, UpstreamEndpoint: service.OpenAIVideosEndpoint,
 			UserAgent: userAgent, IPAddress: clientIP, QuotaPlatform: quotaPlatform,
-			RequestPayloadHash: service.HashUsageRequestPayload(body),
+			RequestPayloadHash: payloadHash,
 			FrozenVideoBilling: frozenVideoBilling,
 			ChannelUsageFields: channelMapping.ToUsageFields(requestModel, result.UpstreamModel),
 		}); err != nil {

@@ -68,6 +68,15 @@ func (v *videoMemoryStore) VideoReplace(_ context.Context, key string, b []byte)
 	v.records[key] = append([]byte(nil), b...)
 	return true, nil
 }
+func (v *videoMemoryStore) VideoDeleteIfEqual(_ context.Context, key string, b []byte) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if bytes.Equal(v.records[key], b) {
+		delete(v.records, key)
+		delete(v.expiries, key)
+	}
+	return nil
+}
 func (v *videoMemoryStore) VideoBind(ctx context.Context, m *VideoTaskMetadata) error {
 	b, _ := json.Marshal(m)
 	_, err := v.VideoSave(ctx, VideoTaskMetadataKey(m.GroupID, m.APIKeyID, m.TaskID), b, time.Unix(m.ExpiresAt, 0), true)
@@ -114,6 +123,13 @@ func (v *videoMemoryStore) VideoReferenceTask(_ context.Context, id, task string
 		r.TaskID = task
 		v.references[id] = r
 	}
+	return nil
+}
+
+func (v *videoMemoryStore) VideoDeleteReference(_ context.Context, id string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.references, id)
 	return nil
 }
 
@@ -586,7 +602,7 @@ func TestVideoReferenceRegistrationFailureRemovesPublishedFile(t *testing.T) {
 	runtime.cancel()
 	<-runtime.done
 	_, err = runtime.save(context.Background(), &APIKey{ID: 8}, legacyTestPNG(t))
-	require.EqualError(t, err, "register video reference")
+	require.ErrorContains(t, err, "Save input_reference[1]: register video reference in Redis: test Redis unavailable")
 	require.Equal(t, int64(1), runtime.uploadFailures.Load())
 	err = filepath.WalkDir(cfg.VideoLegacy.ReferenceDir, func(path string, d os.DirEntry, err error) error {
 		require.NoError(t, err)

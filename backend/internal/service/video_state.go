@@ -27,19 +27,20 @@ func ValidateVideoProtocolCredentials(credentials map[string]any) error {
 }
 
 type VideoTaskMetadata struct {
-	SchemaVersion    int    `json:"schema_version"`
-	TaskID           string `json:"task_id"`
-	APIKeyID         int64  `json:"api_key_id"`
-	GroupID          int64  `json:"group_id"`
-	AccountID        int64  `json:"account_id"`
-	Protocol         string `json:"protocol"`
-	RequestedModel   string `json:"requested_model"`
-	UpstreamModel    string `json:"upstream_model"`
-	ReferenceAssetID string `json:"reference_asset_id,omitempty"`
-	BillingRequestID string `json:"billing_request_id"`
-	LastStatus       string `json:"last_status"`
-	BoundAt          int64  `json:"bound_at"`
-	ExpiresAt        int64  `json:"expires_at"`
+	SchemaVersion     int      `json:"schema_version"`
+	TaskID            string   `json:"task_id"`
+	APIKeyID          int64    `json:"api_key_id"`
+	GroupID           int64    `json:"group_id"`
+	AccountID         int64    `json:"account_id"`
+	Protocol          string   `json:"protocol"`
+	RequestedModel    string   `json:"requested_model"`
+	UpstreamModel     string   `json:"upstream_model"`
+	ReferenceAssetID  string   `json:"reference_asset_id,omitempty"`
+	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
+	BillingRequestID  string   `json:"billing_request_id"`
+	LastStatus        string   `json:"last_status"`
+	BoundAt           int64    `json:"bound_at"`
+	ExpiresAt         int64    `json:"expires_at"`
 }
 
 type VideoReference struct {
@@ -60,16 +61,25 @@ type VideoReference struct {
 	TaskID        string `json:"task_id"`
 }
 
+func (m *VideoTaskMetadata) referenceAssets() []string {
+	if len(m.ReferenceAssetIDs) == 0 && m.ReferenceAssetID != "" {
+		return []string{m.ReferenceAssetID}
+	}
+	return m.ReferenceAssetIDs
+}
+
 // VideoStateStore is implemented by the existing Redis gateway repository.
 type VideoStateStore interface {
 	VideoLoad(context.Context, string) ([]byte, error)
 	VideoSave(context.Context, string, []byte, time.Time, bool) (bool, error)
 	VideoReplace(context.Context, string, []byte) (bool, error)
+	VideoDeleteIfEqual(context.Context, string, []byte) error
 	VideoBind(context.Context, *VideoTaskMetadata) error
 	VideoStatus(context.Context, string, string) (string, error)
 	VideoSaveReference(context.Context, *VideoReference) error
 	VideoLoadReference(context.Context, string) (*VideoReference, error)
 	VideoReferenceTask(context.Context, string, string) error
+	VideoDeleteReference(context.Context, string) error
 }
 
 func VideoTaskMetadataKey(group, key int64, task string) string {
