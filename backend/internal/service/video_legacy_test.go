@@ -647,7 +647,7 @@ func TestLegacyVideoErrorDetailsDoNotExposeSecrets(t *testing.T) {
 	response := []byte(`{"message":"Invalid reference https://relay.example/a?signature=secret using upstream-secret and private prompt"}`)
 	message := legacyErrorMessage(response, request, "upstream-secret")
 	require.Contains(t, message, "Invalid reference")
-	for _, secret := range []string{"https://", "signature=", "upstream-secret", "private prompt"} {
+	for _, secret := range []string{"signature=secret", "upstream-secret", "private prompt"} {
 		require.NotContains(t, message, secret)
 	}
 }
@@ -664,7 +664,7 @@ func TestLegacyVideoFailureDetailsReachQueryDownloadAndLogs(t *testing.T) {
 		upstreamError       any
 	}{
 		{"provider_reason", "InvalidResolution", "Resolution 720p is not supported for this model", map[string]string{"code": "InvalidResolution", "message": "Resolution 720p is not supported for this model"}},
-		{"redacted_reason", "ImageFetchFailed", "Could not fetch [redacted-url] using [redacted-key]", map[string]string{"code": "ImageFetchFailed", "message": "Could not fetch https://relay.example/input.png?signature=private using secret-upstream"}},
+		{"redacted_reason", "ImageFetchFailed", "Could not fetch https://relay.example/input.png?signature=[redacted] using [redacted-key]", map[string]string{"code": "ImageFetchFailed", "message": "Could not fetch https://relay.example/input.png?signature=private using secret-upstream"}},
 		{"redacted_code", "[redacted-key]", "Image fetch rejected", map[string]string{"code": "secret-upstream", "message": "Image fetch rejected"}},
 		{"missing_code", "video_generation_failed", "Provider quota exhausted", map[string]string{"message": "Provider quota exhausted"}},
 		{"missing_message", "InternalError", missingReason, map[string]string{"code": "InternalError", "message": " \n "}},
@@ -690,20 +690,23 @@ func TestLegacyVideoFailureDetailsReachQueryDownloadAndLogs(t *testing.T) {
 				c, w := videoTestContext("GET", "/v1/videos/"+legacyTestTaskID, nil, "")
 				_, err = svc.ForwardVideo(context.Background(), c, account, key, nil, legacyTestTaskID, download, "")
 				var output struct {
-					Status string            `json:"status"`
-					Error  map[string]string `json:"error"`
+					Status string         `json:"status"`
+					Error  map[string]any `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &output))
 				if download {
 					require.Error(t, err)
 					require.Equal(t, http.StatusConflict, w.Code)
-					require.Equal(t, "video_not_downloadable", output.Error["code"])
+					require.Equal(t, test.code, output.Error["code"])
+					require.Equal(t, "video_not_downloadable", output.Error["platform_code"])
 					require.Contains(t, output.Error["message"], "["+test.code+"]: "+test.message)
 				} else {
 					require.NoError(t, err)
 					require.Equal(t, http.StatusOK, w.Code)
 					require.Equal(t, "failed", output.Status)
-					require.Equal(t, map[string]string{"code": test.code, "message": test.message}, output.Error)
+					require.Equal(t, test.code, output.Error["code"])
+					require.Equal(t, test.message, output.Error["message"])
+					require.Equal(t, "upstream", output.Error["source"])
 				}
 				var logEntry map[string]any
 				require.NoError(t, json.Unmarshal(logs.Bytes(), &logEntry))
@@ -713,7 +716,7 @@ func TestLegacyVideoFailureDetailsReachQueryDownloadAndLogs(t *testing.T) {
 				require.Equal(t, "billing-test", logEntry["billing_request_id"])
 				require.Equal(t, test.code, logEntry["upstream_code"])
 				require.Equal(t, test.message, logEntry["reason"])
-				for _, secret := range []string{"secret-upstream", "https://relay.example", "signature=private"} {
+				for _, secret := range []string{"secret-upstream", "signature=private"} {
 					require.NotContains(t, w.Body.String(), secret)
 					require.NotContains(t, logs.String(), secret)
 				}

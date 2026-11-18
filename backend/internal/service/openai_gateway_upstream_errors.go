@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -333,7 +334,7 @@ func (s *OpenAIGatewayService) handleOpenAISessionPolicyErrorResponse(resp *http
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		c.Data(resp.StatusCode, contentType, body)
+		c.Data(resp.StatusCode, contentType, errordetail.Body(body))
 	}
 	return fmt.Errorf("openai session policy error: %d", resp.StatusCode)
 }
@@ -348,6 +349,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	CaptureUpstreamError(c, resp.StatusCode, resp.Header, body)
 	if isOpenAISessionPolicyError(resp.StatusCode, body) {
 		return nil, s.handleOpenAISessionPolicyErrorResponse(resp, c, body)
 	}
@@ -430,12 +432,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
-		c.JSON(status, gin.H{
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
+		writeUpstreamError(c, status, errType, errMsg, false)
 		if upstreamMsg == "" {
 			upstreamMsg = errMsg
 		}
@@ -458,12 +455,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		MarkResponseCommitted(c)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"type":    "upstream_error",
-				"message": "Upstream gateway error",
-			},
-		})
+		writeUpstreamError(c, http.StatusInternalServerError, "upstream_error", upstreamMsg, false)
 		if upstreamMsg == "" {
 			return nil, fmt.Errorf("upstream error: %d (not in custom error codes)", resp.StatusCode)
 		}
@@ -499,6 +491,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			ResponseHeaders:        resp.Header.Clone(),
 		}
 	}
 
@@ -534,12 +527,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errMsg = upstreamMsg
 	}
 
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": errMsg,
-		},
-	})
+	writeUpstreamError(c, statusCode, errType, errMsg, false)
 
 	if upstreamMsg == "" {
 		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
@@ -565,6 +553,12 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
+	CaptureUpstreamError(c, resp.StatusCode, resp.Header, body)
+	originalWriter := writeError
+	writeError = func(c *gin.Context, status int, errorType, message string) {
+		UseUpstreamError(c)
+		originalWriter(c, status, errorType, message)
+	}
 	if isOpenAISessionPolicyError(resp.StatusCode, body) {
 		message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 		if message == "" {
@@ -679,6 +673,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			ResponseHeaders:        resp.Header.Clone(),
 		}
 	}
 

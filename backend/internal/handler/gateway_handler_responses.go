@@ -232,6 +232,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				service.RecordFailoverDiagnostic(c, failoverErr)
 				// Can't failover if streaming content already sent
 				if c.Writer.Size() != writerSizeBeforeForward {
 					h.handleResponsesFailoverExhausted(c, failoverErr, true)
@@ -299,20 +300,24 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
-	c.JSON(status, gin.H{
-		"error": gin.H{
-			"code":    code,
-			"message": message,
-		},
-	})
+	fields := service.GatewayErrorFields(c, "upstream_error", message)
+	if _, ok := fields["code"]; !ok {
+		fields["code"] = code
+	}
+	c.JSON(status, gin.H{"error": fields})
 }
 
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if streamStarted {
-		return // Can't write error after stream started
+		if lastErr != nil {
+			service.CaptureFailoverError(c, lastErr)
+		}
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "No upstream diagnostic available after failover", true)
+		return
 	}
 	if lastErr != nil {
+		service.CaptureFailoverError(c, lastErr)
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {

@@ -598,6 +598,9 @@ type GatewayFailureReason string
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
+	Diagnostic               map[string]any
+	DiagnosticSource         string
+	Cause                    error
 	StatusCode               int
 	ResponseBody             []byte      // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders          http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
@@ -611,6 +614,8 @@ type UpstreamFailoverError struct {
 	ClientStatusCode         int
 	ClientMessage            string
 }
+
+func (e *UpstreamFailoverError) Unwrap() error { return e.Cause }
 
 func (e *UpstreamFailoverError) Error() string {
 	if e != nil && e.Stage == GatewayFailureStageAccountAuth {
@@ -1158,12 +1163,17 @@ func (s *GatewayService) getOAuthToken(ctx context.Context, account *Account) (s
 // GetAvailableModels returns the list of models available for a group
 // It aggregates model_mapping keys from all schedulable accounts in the group
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
+	models, _ := s.GetAvailableModelsWithError(ctx, groupID, platform)
+	return models
+}
+
+func (s *GatewayService) GetAvailableModelsWithError(ctx context.Context, groupID *int64, platform string) ([]string, error) {
 	cacheKey := modelsListCacheKey(groupID, platform)
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
 			if models, ok := cached.([]string); ok {
 				modelsListCacheHitTotal.Add(1)
-				return cloneStringSlice(models)
+				return cloneStringSlice(models), nil
 			}
 		}
 	}
@@ -1178,8 +1188,11 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		accounts, err = s.accountRepo.ListSchedulable(ctx)
 	}
 
-	if err != nil || len(accounts) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("Read schedulable model accounts: %w", err)
+	}
+	if len(accounts) == 0 {
+		return nil, nil
 	}
 
 	// Filter by platform if specified
@@ -1207,13 +1220,13 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 	}
 
-	// If no account has model_mapping, return nil (use default)
+	// If no account has model_mapping, return nil, nil (use default)
 	if !hasAnyMapping {
 		if s.modelsListCache != nil {
 			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
 			modelsListCacheStoreTotal.Add(1)
 		}
-		return nil
+		return nil, nil
 	}
 
 	// Convert to slice
@@ -1227,7 +1240,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
 		modelsListCacheStoreTotal.Add(1)
 	}
-	return cloneStringSlice(models)
+	return cloneStringSlice(models), nil
 }
 
 // GetEffectiveModels returns the model IDs advertised by GET /v1/models for a group.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -101,6 +102,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				ResponseHeaders:        resp.Header.Clone(),
 			}
 		}
 	}
@@ -175,6 +177,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				ResponseHeaders:        resp.Header.Clone(),
 			}
 		}
 	}
@@ -194,6 +197,12 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	}
 	alphaRespBody, err := openAIAlphaSearchResponseFromResponsesSSE(respBody)
 	if err != nil {
+		var failure *OpenAIImagesUpstreamError
+		if errors.As(err, &failure) {
+			failure.UpstreamRequestID = resp.Header.Get("x-request-id")
+			setOpsUpstreamError(c, resp.StatusCode, failure.Message, string(respBody))
+			writeOpenAIImagesUpstreamErrorResponse(c, failure)
+		}
 		return nil, err
 	}
 	c.Data(http.StatusOK, "application/json", alphaRespBody)
@@ -510,6 +519,18 @@ func shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(statusCode int) bool {
 }
 
 func openAIAlphaSearchResponseFromResponsesSSE(body []byte) ([]byte, error) {
+	for _, block := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n\n") {
+		data := []byte(openAIAlphaSearchSSEData(block))
+		typeName := gjson.GetBytes(data, "type").String()
+		if typeName == "response.failed" || typeName == "response.incomplete" || typeName == "error" {
+			diagnostic := data
+			if response := gjson.GetBytes(data, "response.error"); response.Exists() {
+				diagnostic = []byte(`{"error":` + response.Raw + `}`)
+			}
+			return nil, openAIImagesUpstreamErrorFromHTTP(502, nil, diagnostic)
+		}
+	}
+
 	output, results := parseOpenAIResponsesSSEForAlphaSearch(body)
 	resp := map[string]any{
 		"output": output,

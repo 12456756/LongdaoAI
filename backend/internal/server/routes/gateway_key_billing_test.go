@@ -164,6 +164,7 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 			"type": "error",
 			"error": {
 				"type": "not_found_error",
+                "source": "platform",
 				"message": "Billing information is not supported in simple mode"
 			}
 		}`, w.Body.String())

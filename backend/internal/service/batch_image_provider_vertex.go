@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"io"
 	"net/http"
 	"net/url"
@@ -627,7 +628,7 @@ func mapVertexBatchState(job *VertexBatchPredictionJob) *BatchProviderStatus {
 func vertexProviderError(reason, message string, cause error) error {
 	err := infraerrors.New(http.StatusBadGateway, reason, message)
 	if cause != nil {
-		return err.WithCause(cause)
+		return err.WithCause(safeDiagnosticCause(cause))
 	}
 	return err
 }
@@ -647,18 +648,18 @@ func mapVertexClientError(err error) error {
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
 		case http.StatusUnauthorized:
-			return vertexProviderError("VERTEX_AUTH_FAILED", "Vertex authentication failed", nil)
+			return vertexProviderError("VERTEX_AUTH_FAILED", sanitizeUpstreamErrorMessage(err.Error()), err)
 		case http.StatusForbidden:
-			return vertexProviderError("VERTEX_PERMISSION_DENIED", "Vertex permission denied", nil)
+			return vertexProviderError("VERTEX_PERMISSION_DENIED", sanitizeUpstreamErrorMessage(err.Error()), err)
 		case http.StatusTooManyRequests:
-			return vertexProviderError("VERTEX_RATE_LIMITED", "Vertex rate limit exceeded", nil)
+			return vertexProviderError("VERTEX_RATE_LIMITED", sanitizeUpstreamErrorMessage(err.Error()), err)
 		case http.StatusNotFound:
-			return vertexProviderError("VERTEX_BATCH_NOT_FOUND", "Vertex batch resource was not found", nil)
+			return vertexProviderError("VERTEX_BATCH_NOT_FOUND", sanitizeUpstreamErrorMessage(err.Error()), err)
 		default:
-			return vertexProviderError("VERTEX_INVALID_RESPONSE", "Vertex API request failed", nil)
+			return vertexProviderError("VERTEX_INVALID_RESPONSE", sanitizeUpstreamErrorMessage(err.Error()), err)
 		}
 	}
-	return vertexProviderError("VERTEX_INVALID_RESPONSE", "Vertex API request failed", err)
+	return vertexProviderError("VERTEX_INVALID_RESPONSE", sanitizeUpstreamErrorMessage(err.Error()), err)
 }
 
 type vertexCombinedJSONLReadCloser struct {
@@ -930,6 +931,7 @@ type VertexAPIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	Diagnostic map[string]any
 }
 
 func (e *VertexAPIError) Error() string {
@@ -937,9 +939,9 @@ func (e *VertexAPIError) Error() string {
 		return "<nil>"
 	}
 	if e.Code != "" {
-		return fmt.Sprintf("vertex api error: status=%d code=%s message=%s", e.StatusCode, e.Code, e.Message)
+		return sanitizeUpstreamErrorMessage(fmt.Sprintf("vertex api error: status=%d code=%s message=%s", e.StatusCode, e.Code, e.Message))
 	}
-	return fmt.Sprintf("vertex api error: status=%d message=%s", e.StatusCode, e.Message)
+	return sanitizeUpstreamErrorMessage(fmt.Sprintf("vertex api error: status=%d message=%s", e.StatusCode, e.Message))
 }
 
 func doVertexJSON[T any](client *http.Client, req *http.Request) (*T, error) {
@@ -975,21 +977,18 @@ func doVertexNoBody(client *http.Client, req *http.Request) error {
 }
 
 func readVertexAPIError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	message := string(body)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	d := errordetail.Diagnostic(resp.StatusCode, resp.Header, body)
+	if readErr != nil {
+		d["body_read_error"] = errordetail.Text(readErr.Error())
+	}
 	code := ""
-	var parsed struct {
-		Error struct {
-			Code    any    `json:"code"`
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
+	if v := d["code"]; v != nil {
+		code = fmt.Sprint(v)
+	} else if v := d["status"]; v != nil {
+		code = fmt.Sprint(v)
 	}
-	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
-		message = parsed.Error.Message
-		code = parsed.Error.Status
-	}
-	return &VertexAPIError{StatusCode: resp.StatusCode, Code: code, Message: message}
+	return &VertexAPIError{StatusCode: resp.StatusCode, Code: code, Message: fmt.Sprint(d["message"]), Diagnostic: d}
 }
 
 var _ BatchImageProvider = (*VertexBatchImageProvider)(nil)

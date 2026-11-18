@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 // VideoBillingQuote is a customer charge for one video, not a provider rate card.
 // Mode video means per-second pricing; per_request does not multiply duration.
 type VideoBillingQuote struct {
+	Diagnostic string
 	Mode       BillingMode
 	Source     string
 	Amount     *string
@@ -72,16 +74,28 @@ func (r *OpenAIVideoRequest) VideoBillingOperation() string {
 }
 
 func (s *OpenAIGatewayService) PrepareVideoBilling(ctx context.Context, key *APIKey, request *OpenAIVideoRequest, operation, version string) (*FrozenVideoBilling, error) {
-	if request == nil || operation != request.VideoBillingOperation() {
-		return nil, ErrVideoPricingChanged
+	if request == nil {
+		return nil, fmt.Errorf("Video request is missing: %w", ErrVideoPricingChanged)
+	}
+	if operation != request.VideoBillingOperation() {
+		return nil, fmt.Errorf("X-Video-Operation %q does not match request operation %q: %w", operation, request.VideoBillingOperation(), ErrVideoPricingChanged)
 	}
 	quote, err := s.QuoteVideoBilling(ctx, key, request.Model, request.Resolution, request.Seconds, time.Now())
-	if err != nil || quote == nil || quote.Amount == nil || quote.cost == nil {
-		return nil, ErrVideoPricingChanged
+	if err != nil {
+		return nil, fmt.Errorf("Verify video quote: %w", err)
+	}
+	if quote == nil {
+		return nil, fmt.Errorf("Video quote was not returned: %w", ErrVideoPricingChanged)
+	}
+	if quote.Amount == nil || quote.cost == nil {
+		return nil, fmt.Errorf("Video model %q at %s has no valid price (source=%s, diagnostic=%s): %w", request.Model, request.Resolution, quote.Source, quote.Diagnostic, ErrVideoPricingChanged)
 	}
 	current, err := quote.Version(key, request.Model, operation, request.Resolution, request.Seconds)
-	if err != nil || current != version {
-		return nil, ErrVideoPricingChanged
+	if err != nil {
+		return nil, fmt.Errorf("Compute video pricing version: %w", err)
+	}
+	if current != version {
+		return nil, fmt.Errorf("Video pricing version no longer matches the current quote: %w", ErrVideoPricingChanged)
 	}
 	return &FrozenVideoBilling{keyID: key.ID, userID: key.UserID, groupID: *key.GroupID,
 		model: request.Model, multiplier: quote.Multiplier, cost: *quote.cost, mapping: quote.mapping}, nil
@@ -115,8 +129,11 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 	view := &OpenAIGatewayService{billingService: s.billingService, channelService: s.channelService, resolver: s.resolver}
 	if s.channelService != nil && s.channelService.groupRepo != nil {
 		group, err := s.channelService.groupRepo.GetByIDLite(ctx, *key.GroupID)
-		if err != nil || group == nil || group.ID != *key.GroupID {
-			return nil, errors.New("video billing group is unavailable")
+		if err != nil {
+			return nil, fmt.Errorf("Read video billing group: %w", err)
+		}
+		if group == nil || group.ID != *key.GroupID {
+			return nil, errors.New("Video billing group was not found or does not match the API key group")
 		}
 		clone := *key
 		clone.Group = group
@@ -125,7 +142,7 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 	if s.channelService != nil && s.channelService.repo != nil {
 		channels := NewChannelService(s.channelService.repo, nil, nil, nil)
 		if _, err := channels.buildCache(ctx); err != nil {
-			return &VideoBillingQuote{Mode: BillingModeVideo, Source: "model_mapping_unavailable", Multiplier: 1}, nil
+			return &VideoBillingQuote{Mode: BillingModeVideo, Source: "model_mapping_unavailable", Multiplier: 1, Diagnostic: sanitizeUpstreamErrorMessage("Read video channel configuration: " + err.Error())}, nil
 		}
 		view.channelService = channels
 		view.resolver = NewModelPricingResolver(channels, s.billingService)
@@ -134,7 +151,7 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 	if s.userGroupRateResolver != nil && s.userGroupRateResolver.repo != nil {
 		rate, err := s.userGroupRateResolver.repo.GetByUserAndGroup(ctx, key.UserID, *key.GroupID)
 		if err != nil {
-			return nil, errors.New("video billing rate is unavailable")
+			return nil, fmt.Errorf("Read user video billing rate: %w", err)
 		}
 		base = key.Group.RateMultiplier
 		if rate != nil {
@@ -149,6 +166,7 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 		lookup, err := s.channelService.lookupGroupChannel(ctx, *key.GroupID)
 		if err != nil {
 			quote.Source = "model_mapping_unavailable"
+			quote.Diagnostic = sanitizeUpstreamErrorMessage("Read video group channel mapping: " + err.Error())
 			return quote, nil
 		}
 		mapping := ChannelMappingResult{MappedModel: model}

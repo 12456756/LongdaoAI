@@ -64,10 +64,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	}
 	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
+		return nil, platformFailoverError(http.StatusBadGateway, "authentication_error", "Get Antigravity access token", err)
 	}
 
 	projectID, err := resolveAntigravityProjectID(account)
@@ -90,7 +87,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	// 转换 Claude 请求为 Gemini 格式
 	geminiBody, err := antigravity.TransformClaudeToGeminiWithOptions(&claudeReq, projectID, mappedModel, transformOpts)
 	if err != nil {
-		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
+		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Convert Anthropic request to Gemini: "+sanitizeUpstreamErrorMessage(err.Error()))
 	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent
@@ -121,6 +118,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
 				StatusCode:        http.StatusServiceUnavailable,
+				Cause:             err,
+				Diagnostic:        antigravitySwitchDiagnostic(c, err),
+				DiagnosticSource:  "platform",
 				ForceCacheBilling: switchErr.IsStickySession,
 			}
 		}
@@ -128,7 +128,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		if c.Request.Context().Err() != nil {
 			return nil, s.writeClaudeError(c, http.StatusBadGateway, "client_disconnected", "Client disconnected before upstream response")
 		}
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries")
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Send Antigravity request after retries: "+sanitizeUpstreamErrorMessage(err.Error()))
 	}
 	resp := result.resp
 	defer func() { _ = resp.Body.Close() }()
@@ -393,7 +393,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 						Message:            upstreamMsg,
 						Detail:             upstreamDetail,
 					})
-					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true, ResponseHeaders: resp.Header.Clone()}
 				}
 			}
 
@@ -411,7 +411,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 
 			return nil, s.writeMappedClaudeError(c, account, resp.StatusCode, resp.Header.Get("x-request-id"), respBody)

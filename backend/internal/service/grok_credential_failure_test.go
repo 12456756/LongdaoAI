@@ -257,6 +257,13 @@ func TestGetRequestCredentialMapsPermanentGrokOAuthFailureAndRedactsSecrets(t *t
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.Equal(t, 0, failoverErr.StatusCode)
 	require.Equal(t, http.StatusServiceUnavailable, failoverErr.ClientStatusCode)
+	require.Contains(t, failoverErr.ClientMessage, "invalid_grant")
+	require.NotContains(t, failoverErr.ClientMessage, "leaked-access")
+	require.NotContains(t, failoverErr.ClientMessage, "leaked-refresh")
+	require.NotNil(t, errors.Unwrap(failoverErr))
+	require.Contains(t, errors.Unwrap(failoverErr).Error(), "invalid_grant")
+	require.NotContains(t, errors.Unwrap(failoverErr).Error(), "leaked-access")
+	require.NotContains(t, errors.Unwrap(failoverErr).Error(), "leaked-refresh")
 	require.NotContains(t, err.Error(), "leaked-access")
 	require.NotContains(t, err.Error(), "leaked-refresh")
 
@@ -276,6 +283,7 @@ func TestGetRequestCredentialMapsPermanentGrokOAuthFailureAndRedactsSecrets(t *t
 	require.Equal(t, string(GatewayFailureScopeAccount), events[0].Scope)
 	require.Equal(t, string(GrokCredentialReasonRevoked), events[0].Reason)
 	require.Zero(t, events[0].UpstreamStatusCode)
+	require.Contains(t, events[0].Message, "invalid_grant")
 	require.NotContains(t, events[0].Message, "leaked-access")
 	require.NotContains(t, events[0].Message, "leaked-refresh")
 }

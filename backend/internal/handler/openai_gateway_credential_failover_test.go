@@ -37,9 +37,10 @@ func TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503(t
 	(&GatewayHandler{}).handleCCFailoverExhausted(c, state.LastFailoverErr, false)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
-	require.NotContains(t, recorder.Body.String(), "invalid_client")
-	require.NotContains(t, recorder.Body.String(), "client_secret")
+	require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
+	require.Contains(t, recorder.Body.String(), "invalid_client")
+	require.Contains(t, recorder.Body.String(), "client_secret=[redacted]")
+	require.NotContains(t, recorder.Body.String(), "must-not-leak")
 }
 
 func TestGatewayChatInferenceExhaustionRestoresRetryAfter(t *testing.T) {
@@ -56,7 +57,7 @@ func TestGatewayChatInferenceExhaustionRestoresRetryAfter(t *testing.T) {
 	require.Equal(t, "45", recorder.Header().Get("Retry-After"))
 }
 
-func TestCredentialFailoverExhaustionReturnsFixedSafe503(t *testing.T) {
+func TestCredentialFailoverExhaustionReturnsRedactedDiagnostic503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -72,9 +73,9 @@ func TestCredentialFailoverExhaustionReturnsFixedSafe503(t *testing.T) {
 	}, false)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
-	require.NotContains(t, strings.ToLower(recorder.Body.String()), "invalid_grant")
-	require.NotContains(t, strings.ToLower(recorder.Body.String()), "refresh_token")
+	require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
+	require.Contains(t, strings.ToLower(recorder.Body.String()), "invalid_grant")
+	require.Contains(t, strings.ToLower(recorder.Body.String()), "refresh_token=[redacted]")
 	require.NotContains(t, recorder.Body.String(), "must-not-leak")
 }
 

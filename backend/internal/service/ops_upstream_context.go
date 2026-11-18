@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 )
 
@@ -153,10 +154,10 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	if upstreamStatusCode > 0 {
 		c.Set(OpsUpstreamStatusCodeKey, upstreamStatusCode)
 	}
-	if msg := strings.TrimSpace(upstreamMessage); msg != "" {
+	if msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(upstreamMessage)); msg != "" {
 		c.Set(OpsUpstreamErrorMessageKey, msg)
 	}
-	if detail := strings.TrimSpace(upstreamDetail); detail != "" {
+	if detail := string(errordetail.Body([]byte(upstreamDetail))); detail != "" {
 		c.Set(OpsUpstreamErrorDetailKey, detail)
 	}
 }
@@ -164,7 +165,11 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 // OpsUpstreamErrorEvent describes one upstream error attempt during a single gateway request.
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
-	AtUnixMs int64 `json:"at_unix_ms,omitempty"`
+	Diagnostic             map[string]any `json:"diagnostic,omitempty"`
+	MessageTruncated       bool           `json:"message_truncated,omitempty"`
+	DiagnosticTruncated    bool           `json:"diagnostic_truncated,omitempty"`
+	EarlierAttemptsOmitted int            `json:"earlier_attempts_omitted,omitempty"`
+	AtUnixMs               int64          `json:"at_unix_ms,omitempty"`
 
 	// Passthrough 表示本次请求是否命中“原样透传（仅替换认证）”分支。
 	// 该字段用于排障与灰度评估；存入 JSON，不涉及 DB schema 变更。
@@ -207,14 +212,14 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	}
 	ev.Platform = strings.TrimSpace(ev.Platform)
 	ev.UpstreamRequestID = strings.TrimSpace(ev.UpstreamRequestID)
-	ev.UpstreamResponseBody = strings.TrimSpace(ev.UpstreamResponseBody)
+	ev.UpstreamResponseBody = string(errordetail.Body([]byte(ev.UpstreamResponseBody)))
 	ev.Kind = strings.TrimSpace(ev.Kind)
 	ev.Stage = strings.TrimSpace(ev.Stage)
 	ev.Scope = strings.TrimSpace(ev.Scope)
 	ev.Reason = strings.TrimSpace(ev.Reason)
-	ev.UpstreamURL = strings.TrimSpace(ev.UpstreamURL)
+	ev.UpstreamURL = errordetail.Text(ev.UpstreamURL)
 	ev.Message = strings.TrimSpace(ev.Message)
-	ev.Detail = strings.TrimSpace(ev.Detail)
+	ev.Detail = string(errordetail.Body([]byte(ev.Detail)))
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
 	}
@@ -226,6 +231,13 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		}
 	}
 
+	if ev.Diagnostic == nil {
+		if value, ok := c.Get(upstreamDiagnosticKey); ok {
+			if diagnostic, ok := value.(map[string]any); ok && diagnostic["upstream_status"] == ev.UpstreamStatusCode && diagnostic["message"] == ev.Message {
+				ev.Diagnostic = diagnostic
+			}
+		}
+	}
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)

@@ -342,7 +342,7 @@ func TestSanitizeStreamError_KnownErrors(t *testing.T) {
 		{"ECONNRESET 直接", syscall.ECONNRESET, "connection reset by peer"},
 		{"EPIPE", syscall.EPIPE, "broken pipe"},
 		{"ETIMEDOUT", syscall.ETIMEDOUT, "connection timed out"},
-		{"未识别错误兜底", errors.New("weird internal error"), "upstream connection error"},
+		{"未识别错误兜底", errors.New("weird internal error"), "weird internal error"},
 		{"nil 返回空串", nil, ""},
 	}
 	for _, tc := range cases {
@@ -531,5 +531,5 @@ func TestHandleStreamingResponse_SSEErrorEvent_NonJSONDataLine(t *testing.T) {
 	require.NotPanics(t, func() {
 		_ = ExtractUpstreamErrorMessage([]byte(sseErr.RawData))
 	})
-	require.Equal(t, "", ExtractUpstreamErrorMessage([]byte(sseErr.RawData)))
+	require.Equal(t, "not-a-json-payload", ExtractUpstreamErrorMessage([]byte(sseErr.RawData)))
 }

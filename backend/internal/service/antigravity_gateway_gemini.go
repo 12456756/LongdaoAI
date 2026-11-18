@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 )
 
@@ -98,10 +99,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	}
 	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
+		return nil, platformFailoverError(http.StatusBadGateway, "authentication_error", "Get Antigravity access token", err)
 	}
 
 	projectID, err := resolveAntigravityProjectID(account)
@@ -164,6 +162,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
 				StatusCode:        http.StatusServiceUnavailable,
+				Cause:             err,
+				Diagnostic:        antigravitySwitchDiagnostic(c, err),
+				DiagnosticSource:  "platform",
 				ForceCacheBilling: switchErr.IsStickySession,
 			}
 		}
@@ -171,7 +172,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		if c.Request.Context().Err() != nil {
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Client disconnected before upstream response")
 		}
-		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Upstream request failed after retries")
+		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Send Antigravity request after retries: "+sanitizeUpstreamErrorMessage(err.Error()))
 	}
 	resp := result.resp
 	defer func() {
@@ -338,6 +339,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		upstreamDetail := s.getUpstreamErrorDetail(unwrappedForOps)
 
 		// Always record upstream context for Ops error logs, even when we will failover.
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, unwrappedForOps)
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 
 		// 精确匹配服务端配置类 400 错误，触发同账号重试 + failover
@@ -353,7 +355,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true, ResponseHeaders: resp.Header.Clone()}
 		}
 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
@@ -367,7 +369,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone()}
 		}
 		if contentType == "" {
 			contentType = "application/json"
@@ -384,7 +386,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		})
 		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] upstream error status=%d body=%s", resp.StatusCode, truncateForLog(unwrappedForOps, 500))
 		MarkResponseCommitted(c)
-		c.Data(resp.StatusCode, contentType, unwrappedForOps)
+		UseUpstreamError(c)
+		c.Data(resp.StatusCode, contentType, errordetail.Body(unwrappedForOps))
 		return nil, fmt.Errorf("antigravity upstream error: %d", resp.StatusCode)
 	}
 

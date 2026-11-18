@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -37,6 +38,7 @@ type OpenAIImagesUpstreamError struct {
 	Message           string
 	Param             string
 	UpstreamRequestID string
+	Diagnostic        map[string]any
 }
 
 func (e *OpenAIImagesUpstreamError) Error() string {
@@ -137,7 +139,10 @@ func openAIImagesUpstreamErrorResponseBody(err *OpenAIImagesUpstreamError) []byt
 	if param := strings.TrimSpace(err.Param); param != "" {
 		body, _ = sjson.SetBytes(body, "error.param", param)
 	}
-	return body
+	if len(err.Diagnostic) > 0 {
+		body, _ = sjson.SetBytes(body, "error", err.Diagnostic)
+	}
+	return errordetail.Body(body)
 }
 
 func openAIResponsesImageResultKey(itemID string, result openAIResponsesImageResult) string {
@@ -757,6 +762,7 @@ func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID
 		Message:           sanitizeUpstreamErrorMessage(message),
 		Param:             param,
 		UpstreamRequestID: strings.TrimSpace(upstreamRequestID),
+		Diagnostic:        errordetail.Diagnostic(0, http.Header{"X-Request-Id": []string{upstreamRequestID}}, []byte(errorObj.Raw)),
 	}
 }
 
@@ -807,6 +813,7 @@ func openAIImagesUpstreamErrorFromHTTP(statusCode int, header http.Header, body 
 		Message:           message,
 		Param:             param,
 		UpstreamRequestID: requestID,
+		Diagnostic:        errordetail.Diagnostic(statusCode, header, body),
 	}
 }
 
@@ -829,6 +836,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	CaptureUpstreamError(c, resp.StatusCode, resp.Header, body)
 
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := ""
@@ -921,6 +929,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			ResponseHeaders:        resp.Header.Clone(),
 		}
 	}
 
@@ -1001,6 +1010,12 @@ func buildOpenAIImagesStreamErrorBodyFromUpstream(err *OpenAIImagesUpstreamError
 		return buildOpenAIImagesStreamErrorBody("")
 	}
 	body := buildOpenAIImagesStreamErrorBody(err.clientMessage())
+	if len(err.Diagnostic) > 0 {
+		body, _ = sjson.SetBytes(body, "error", err.Diagnostic)
+	}
+	if err.UpstreamRequestID != "" {
+		body, _ = sjson.SetBytes(body, "error.upstream_request_id", errordetail.Text(err.UpstreamRequestID))
+	}
 	body, _ = sjson.SetBytes(body, "error.type", err.clientErrorType())
 	if code := strings.TrimSpace(err.Code); code != "" {
 		body, _ = sjson.SetBytes(body, "error.code", code)
@@ -1008,7 +1023,7 @@ func buildOpenAIImagesStreamErrorBodyFromUpstream(err *OpenAIImagesUpstreamError
 	if param := strings.TrimSpace(err.Param); param != "" {
 		body, _ = sjson.SetBytes(body, "error.param", param)
 	}
-	return body
+	return errordetail.Body(body)
 }
 
 func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUpstreamError) bool {
@@ -1029,8 +1044,17 @@ func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUps
 	if param := strings.TrimSpace(err.Param); param != "" {
 		errorObj["param"] = param
 	}
+	for k, v := range err.Diagnostic {
+		errorObj[k] = v
+	}
+	if err.UpstreamRequestID != "" {
+		errorObj["upstream_request_id"] = errordetail.Text(err.UpstreamRequestID)
+		if !strings.ContainsAny(err.UpstreamRequestID, "\r\n") {
+			c.Header("X-Upstream-Request-ID", errordetail.Text(err.UpstreamRequestID))
+		}
+	}
 	c.JSON(err.clientStatusCode(), gin.H{
-		"error": errorObj,
+		"error": errordetail.Value(map[string]any(errorObj)),
 	})
 	return true
 }
@@ -1750,6 +1774,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				ResponseHeaders:        resp.Header.Clone(),
 			}
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
@@ -1870,6 +1895,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		UpstreamRequestID:  requestID,
 		UpstreamURL:        upstreamURL,
 		Kind:               kind,
+		Diagnostic:         upstreamErr.Diagnostic,
 		Message:            upstreamErr.clientMessage(),
 	})
 

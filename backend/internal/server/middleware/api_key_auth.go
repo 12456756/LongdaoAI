@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 
 	"github.com/gin-gonic/gin"
 )
@@ -76,7 +77,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
 				return
 			}
-			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
+			AbortWithError(c, 500, "INTERNAL_ERROR", "Validate API key in platform storage: "+errordetail.Text(err.Error()))
 			return
 		}
 

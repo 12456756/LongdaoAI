@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -160,6 +161,8 @@ func (h *BatchImageHandler) ItemContent(c *gin.Context) {
 	}
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, stream.Reader); err != nil {
+		logger.L().Warn("batch_image.download_interrupted", zap.String("batch_id", c.Param("id")), zap.String("reason", errordetail.Text(err.Error())))
+		_ = c.Error(err)
 		return
 	}
 	h.markDownloadedBestEffort(c, owner)
@@ -194,6 +197,7 @@ func (h *BatchImageHandler) Download(c *gin.Context) {
 		IncludeManifest: true,
 	}, c.Writer)
 	if err != nil {
+		logger.L().Warn("batch_image.zip_download_failed", zap.String("batch_id", c.Param("id")), zap.String("reason", errordetail.Text(err.Error())))
 		if result == nil || !c.Writer.Written() {
 			batchImageError(c, err)
 		}
@@ -260,11 +264,26 @@ func batchImageError(c *gin.Context, err error) {
 		code = "BATCH_IMAGE_NOT_FOUND"
 		message = "batch image job not found"
 	}
-	c.JSON(status, gin.H{
-		"error": gin.H{
-			"type":    "invalid_request_error",
-			"code":    code,
-			"message": message,
-		},
-	})
+	errorType := "invalid_request_error"
+	if status >= 500 {
+		errorType = "api_error"
+	} else if status == 401 {
+		errorType = "authentication_error"
+	} else if status == 403 {
+		errorType = "permission_error"
+	} else if status == 429 {
+		errorType = "rate_limit_error"
+	}
+	if err != nil && message == "internal error" {
+		message = err.Error()
+	}
+	fields := gin.H{"type": errorType, "source": "platform", "code": code, "message": errordetail.Text(message)}
+	if diagnostic := service.ProviderErrorDiagnostic(err); diagnostic != nil {
+		fields["platform_code"] = code
+		fields["platform_message"] = errordetail.Text(message)
+		for k, v := range diagnostic {
+			fields[k] = v
+		}
+	}
+	c.JSON(status, gin.H{"error": errordetail.Value(map[string]any(fields))})
 }

@@ -120,14 +120,14 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Get account access token: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return err
 	}
 
 	// 构建上游请求
 	upstreamReq, wireBody, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
 	if err != nil {
-		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
+		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Build token count request: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return err
 	}
 	// 先记录首发 wire body；如果后面进入 400 retry，retry 会基于未签名的逻辑 body 重新构建。
@@ -145,7 +145,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
-		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Send token count request: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
 
@@ -157,7 +157,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
+			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Read token count response: "+sanitizeUpstreamErrorMessage(err.Error()))
 		}
 		return err
 	}
@@ -180,7 +180,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 				_ = resp.Body.Close()
 				if err != nil {
 					if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-						s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
+						s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Read token count response: "+sanitizeUpstreamErrorMessage(err.Error()))
 					}
 					return err
 				}
@@ -197,6 +197,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	// 处理错误响应
 	if resp.StatusCode >= 400 {
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, respBody)
 		// 标记账号状态（429/529等）
 		s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 
@@ -247,7 +248,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx context.Context, c *gin.Context, account *Account, body []byte) error {
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Get account access token: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return err
 	}
 	if tokenType != "apikey" {
@@ -257,7 +258,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 
 	upstreamReq, err := s.buildCountTokensRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, token)
 	if err != nil {
-		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
+		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Build token count request: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return err
 	}
 
@@ -279,7 +280,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			Kind:               "request_error",
 			Message:            sanitizeUpstreamErrorMessage(err.Error()),
 		})
-		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Send token count request: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
 
@@ -290,12 +291,13 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
+			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Read token count response: "+sanitizeUpstreamErrorMessage(err.Error()))
 		}
 		return err
 	}
 
 	if resp.StatusCode >= 400 {
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, respBody)
 		if s.rateLimitService != nil {
 			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
@@ -596,11 +598,5 @@ func sanitizeCountTokensRequestBody(body []byte) []byte {
 
 // countTokensError 返回 count_tokens 错误响应
 func (s *GatewayService) countTokensError(c *gin.Context, status int, errType, message string) {
-	c.JSON(status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	writeUpstreamError(c, status, errType, message, true)
 }

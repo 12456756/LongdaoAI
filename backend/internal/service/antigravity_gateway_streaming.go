@@ -637,7 +637,7 @@ func (s *AntigravityGatewayService) writeClaudeError(c *gin.Context, status int,
 	MarkResponseCommitted(c)
 	c.JSON(status, gin.H{
 		"type":  "error",
-		"error": gin.H{"type": errType, "message": message},
+		"error": GatewayErrorFields(c, errType, message),
 	})
 	return fmt.Errorf("%s", message)
 }
@@ -648,6 +648,8 @@ func (s *AntigravityGatewayService) WriteMappedClaudeError(c *gin.Context, accou
 }
 
 func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte) error {
+	CaptureUpstreamError(c, upstreamStatus, http.Header{"X-Request-Id": []string{upstreamRequestID}}, body)
+	UseUpstreamError(c)
 	MarkResponseCommitted(c)
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -677,7 +679,7 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 	); matched {
 		c.JSON(ptStatus, gin.H{
 			"type":  "error",
-			"error": gin.H{"type": ptErrType, "message": ptErrMsg},
+			"error": GatewayErrorFields(c, ptErrType, ptErrMsg),
 		})
 		if upstreamMsg == "" {
 			return fmt.Errorf("upstream error: %d", upstreamStatus)
@@ -717,7 +719,7 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 
 	c.JSON(statusCode, gin.H{
 		"type":  "error",
-		"error": gin.H{"type": errType, "message": errMsg},
+		"error": GatewayErrorFields(c, errType, errMsg),
 	})
 	if upstreamMsg == "" {
 		return fmt.Errorf("upstream error: %d", upstreamStatus)

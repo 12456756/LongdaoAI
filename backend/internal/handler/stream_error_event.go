@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -20,12 +21,12 @@ type responsesFailedError struct {
 // responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
 // Output 用空 slice（不是 nil）确保 marshal 为 `[]` 而非 `null`。
 type responsesFailedBody struct {
-	ID     string               `json:"id"`
-	Object string               `json:"object"`
-	Model  string               `json:"model,omitempty"`
-	Status string               `json:"status"`
-	Output []any                `json:"output"`
-	Error  responsesFailedError `json:"error"`
+	ID     string `json:"id"`
+	Object string `json:"object"`
+	Model  string `json:"model,omitempty"`
+	Status string `json:"status"`
+	Output []any  `json:"output"`
+	Error  any    `json:"error"`
 }
 
 // responsesFailedEvent 是写入 SSE data 行的顶层结构。
@@ -58,6 +59,10 @@ func writeResponsesFailedSSE(c *gin.Context, errType, message string) bool {
 		return false
 	}
 
+	fields := service.GatewayErrorFields(c, errType, message)
+	if _, ok := fields["code"]; !ok {
+		fields["code"] = mapResponsesErrorCode(errType)
+	}
 	payload, err := json.Marshal(responsesFailedEvent{
 		Type: "response.failed",
 		Response: responsesFailedBody{
@@ -66,10 +71,7 @@ func writeResponsesFailedSSE(c *gin.Context, errType, message string) bool {
 			Model:  requestModel(c),
 			Status: "failed",
 			Output: []any{},
-			Error: responsesFailedError{
-				Code:    mapResponsesErrorCode(errType),
-				Message: message,
-			},
+			Error:  fields,
 		},
 	})
 	if err != nil {

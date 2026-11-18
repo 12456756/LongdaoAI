@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 )
 
 var ErrOpsDisabled = infraerrors.NotFound("OPS_DISABLED", "Ops monitoring is disabled")
@@ -302,15 +304,28 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 	}
 
 	sanitized := make([]*OpsUpstreamErrorEvent, 0, len(events))
-	for _, ev := range events {
+	for eventIndex, ev := range events {
 		if ev == nil {
 			continue
 		}
 		out := *ev
+		if eventIndex == 0 && len(entry.UpstreamErrors) > maxEvents {
+			out.EarlierAttemptsOmitted = len(entry.UpstreamErrors) - maxEvents
+		}
+		if out.Diagnostic != nil {
+			out.Diagnostic, _ = errordetail.Value(out.Diagnostic).(map[string]any)
+			if encoded, _ := json.Marshal(out.Diagnostic); len(encoded) > opsMaxStoredErrorBodyBytes {
+				out.DiagnosticTruncated = true
+				out.Diagnostic = map[string]any{"message": truncateString(fmt.Sprint(out.Diagnostic["message"]), 2048), "code": out.Diagnostic["code"], "type": out.Diagnostic["type"], "param": out.Diagnostic["param"], "upstream_status": out.Diagnostic["upstream_status"], "upstream_request_id": out.Diagnostic["upstream_request_id"]}
+			}
+		}
 
 		out.Platform = strings.TrimSpace(out.Platform)
 		out.UpstreamRequestID = truncateString(strings.TrimSpace(out.UpstreamRequestID), 128)
 		out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
+		out.UpstreamRequestID = errordetail.Text(out.UpstreamRequestID)
+		out.UpstreamURL = errordetail.Text(out.UpstreamURL)
+		out.UpstreamResponseBody, _ = sanitizeErrorBodyForStorage(out.UpstreamResponseBody, opsMaxStoredErrorBodyBytes)
 
 		if out.AccountID < 0 {
 			out.AccountID = 0
@@ -323,6 +338,7 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		}
 
 		msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(out.Message))
+		out.MessageTruncated = len(msg) > 2048
 		msg = truncateString(msg, 2048)
 		out.Message = msg
 
@@ -573,6 +589,8 @@ func redactSensitiveJSON(v any) any {
 			out = append(out, redactSensitiveJSON(vv))
 		}
 		return out
+	case string:
+		return errordetail.Text(t)
 	default:
 		return v
 	}
@@ -786,7 +804,7 @@ func shallowCopyMap(m map[string]any) map[string]any {
 }
 
 func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, truncated bool) {
-	raw = strings.TrimSpace(raw)
+	raw = string(errordetail.Body([]byte(raw)))
 	if raw == "" {
 		return "", false
 	}

@@ -368,7 +368,7 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 			Body: io.NopCloser(bytes.NewBufferString(
-				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_healthy\",\"model\":\"grok-4.5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_healthy\",\"status\":\"completed\",\"model\":\"grok-4.5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
 			)),
 		}, nil
 	}
@@ -434,7 +434,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-		require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
+		require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
 		require.Empty(t, repo.errorIDs())
 		require.Empty(t, upstream.accountHits())
 		require.Equal(t, 1, repo.selectorCalls())
@@ -534,7 +534,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 				router.ServeHTTP(recorder, req)
 
 				require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-				require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
+				require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
 				require.Empty(t, upstream.accountHits())
 				require.Equal(t, 1, repo.selectorCalls())
 			})
@@ -551,7 +551,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-		require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
+		require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
 		require.Equal(t, 1, repo.selectorCalls())
 		require.Empty(t, upstream.accountHits())
 		require.Empty(t, repo.errorIDs())
@@ -590,7 +590,7 @@ func TestResponsesGrok429FailoverIsBounded(t *testing.T) {
 		require.Equal(t, []int64{801, 802}, repo.rateLimitedAccountIDs())
 		require.NotContains(t, recorder.Body.String(), "expired")
 		require.NotContains(t, recorder.Body.String(), "healthy-access")
-		require.NotContains(t, recorder.Body.String(), "rate limited")
+		require.Contains(t, recorder.Body.String(), "rate limited")
 	})
 }
 
@@ -608,7 +608,7 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 
 		require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
-		require.NotContains(t, recorder.Body.String(), "upstream unavailable")
+		require.Contains(t, recorder.Body.String(), "upstream unavailable")
 	})
 
 	t.Run("500 then 429 permits one healthy followup", func(t *testing.T) {
@@ -663,7 +663,7 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 
 		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
-		require.NotContains(t, recorder.Body.String(), "rate limited")
+		require.Contains(t, recorder.Body.String(), "rate limited")
 	})
 }
 
@@ -706,7 +706,7 @@ func TestGrokOAuthCredentialFailoverAcrossHTTPHandlers(t *testing.T) {
 			router.ServeHTTP(recorder, req)
 
 			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-			require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
+			require.Contains(t, recorder.Body.String(), `"type":"credential_error"`)
 			require.NotContains(t, recorder.Body.String(), "revoked-refresh")
 			require.NotContains(t, recorder.Body.String(), "healthy-refresh")
 			require.Equal(t, []int64{801, 802}, repo.errorIDs())
@@ -777,7 +777,12 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		writeFirst(t, conn)
 
 		readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, _, err := conn.Read(readCtx)
+		_, payload, err := conn.Read(readCtx)
+		require.NoError(t, err)
+		require.Contains(t, string(payload), "credential_error")
+		require.Contains(t, string(payload), "invalid_client")
+		require.NotContains(t, string(payload), "must-not-leak")
+		_, _, err = conn.Read(readCtx)
 		cancel()
 		var closeErr coderws.CloseError
 		require.ErrorAs(t, err, &closeErr)

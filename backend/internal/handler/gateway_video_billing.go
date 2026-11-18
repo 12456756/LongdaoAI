@@ -2,6 +2,9 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"io"
 	"math"
 	"net/http"
@@ -25,6 +28,7 @@ type videoPricingRequest struct {
 }
 
 type videoPricingResponse struct {
+	Diagnostic    string `json:"diagnostic,omitempty"`
 	Object        string `json:"object"`
 	SchemaVersion int    `json:"schema_version"`
 	Currency      string `json:"currency"`
@@ -76,8 +80,12 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 	var request videoPricingRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || !validVideoPricingRequest(request) {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid video pricing request")
+	if err := decoder.Decode(&request); err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Decode video pricing request (maximum 4096 bytes): "+errordetail.Text(err.Error()))
+		return
+	}
+	if !validVideoPricingRequest(request) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Expected model (1-160 characters, no whitespace/control characters), operation (text-to-video/image-to-video), resolution (480p/720p/1080p), duration_seconds (1-600)")
 		return
 	}
 	var extra any
@@ -85,18 +93,27 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Expected one JSON object")
 		return
 	}
-	if !service.GroupAllowsImageGeneration(key.Group) || h.gatewayService == nil || !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", "Model is not available for this key")
+	if !service.GroupAllowsImageGeneration(key.Group) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", "Image/video generation is disabled for this API key group")
+		return
+	}
+	if h.gatewayService == nil {
+		h.errorResponse(c, http.StatusForbidden, "api_error", "Platform model validation service is not initialized")
+		return
+	}
+	if !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %q is not available for this API key group", request.Model))
 		return
 	}
 	now := time.Now().UTC()
 	quote, err := h.openAIGatewayService.QuoteVideoBilling(c.Request.Context(), key, request.Model, request.Resolution, request.DurationSeconds, now)
 	if err != nil || quote == nil || math.IsNaN(quote.Multiplier) || math.IsInf(quote.Multiplier, 0) || quote.Multiplier < 0 {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Video pricing is unavailable")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read or version video quote", err, "Quote is missing or its multiplier is invalid"))
 		return
 	}
 	response := videoPricingResponse{
-		Object: "sub2api.video_pricing", SchemaVersion: 1, Currency: "USD", videoPricingRequest: request,
+		Diagnostic: quote.Diagnostic,
+		Object:     "sub2api.video_pricing", SchemaVersion: 1, Currency: "USD", videoPricingRequest: request,
 		BillingMode: quote.Mode, PricingStatus: "unavailable", PricingSource: quote.Source,
 		PricingAuthority: service.PricingAuthoritySub2APICustomerBilling, AmountUSD: quote.Amount,
 		EffectiveRateMultiplier: quote.Multiplier, ObservedAt: now, ExpiresAt: now.Add(time.Minute),
@@ -133,6 +150,7 @@ var videoPricingVersion = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
 // Legacy callers remain compatible. SEP opts into price protection with both
 // headers; only this local, pre-dispatch path may emit the rejection marker.
 func (h *OpenAIGatewayHandler) prepareVideoBilling(c *gin.Context, key *service.APIKey, account *service.Account, request *service.OpenAIVideoRequest) (*service.FrozenVideoBilling, bool) {
+	message, code := "Expected exactly one valid X-Video-Pricing-Version and X-Video-Operation (text-to-video or image-to-video) header", "invalid_video_pricing_headers"
 	versions, operations := c.Request.Header.Values("X-Video-Pricing-Version"), c.Request.Header.Values("X-Video-Operation")
 	if len(versions) == 0 && len(operations) == 0 {
 		return nil, true
@@ -143,12 +161,21 @@ func (h *OpenAIGatewayHandler) prepareVideoBilling(c *gin.Context, key *service.
 		if err == nil && frozen.MatchesAccount(account) {
 			return frozen, true
 		}
+		if err != nil {
+			message = errordetail.Text(err.Error())
+			code = "video_pricing_verification_failed"
+			if errors.Is(err, service.ErrVideoPricingChanged) {
+				code = "video_pricing_changed"
+			}
+		} else {
+			message, code = "Selected upstream account model mapping does not match the quoted video model", "video_pricing_account_mismatch"
+		}
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Video-Dispatch", "rejected")
 	c.JSON(http.StatusConflict, gin.H{"error": gin.H{
-		"type": "invalid_request_error", "code": "video_pricing_changed",
-		"message": "Video pricing or request parameters changed; obtain a new quote before submitting",
+		"type": "invalid_request_error", "code": code, "source": "platform",
+		"message": message,
 	}})
 	return nil, false
 }
@@ -166,7 +193,7 @@ func (h *GatewayHandler) RequestVideoUsage(c *gin.Context) {
 	id := ids[0]
 	evidence, err := h.openAIGatewayService.RequestVideoBilling(c.Request.Context(), key, id)
 	if err != nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Video request billing is unavailable")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read video request billing", err, ""))
 		return
 	}
 	response := videoRequestUsageResponse{Object: "sub2api.video_request_usage", SchemaVersion: 1, Currency: "USD", RequestID: id, Status: "pending"}

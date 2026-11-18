@@ -29,5 +29,5 @@ func concurrencyErrorResponse(err error, slotType string) (int, string, string) 
 		return statusClientClosedRequest, "api_error", "context canceled"
 	}
 
-	return http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable, please retry later"
+	return http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Acquire "+slotType+" concurrency slot", err, "Concurrency service returned no failure reason")
 }

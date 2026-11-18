@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -190,8 +191,26 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 		statusCode = http.StatusOK
 	}
 	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
-		if len(body) == 0 || !json.Valid(body) {
-			h.failTask(taskID, http.StatusBadGateway, imageTaskErrorPayload("api_error", "upstream returned an invalid image response"))
+		if service.UpstreamBodyError(body) {
+			h.failTask(taskID, http.StatusBadGateway, extractImageTaskError(body))
+			return
+		}
+		var output struct {
+			Data []struct {
+				URL string `json:"url"`
+				B64 string `json:"b64_json"`
+			} `json:"data"`
+		}
+		validOutput := json.Unmarshal(body, &output) == nil
+		hasImage := false
+		for _, item := range output.Data {
+			if item.URL != "" || item.B64 != "" {
+				hasImage = true
+				break
+			}
+		}
+		if len(body) == 0 || !json.Valid(body) || !validOutput || !hasImage {
+			h.failTask(taskID, http.StatusBadGateway, imageTaskErrorPayload("api_error", "Upstream response has no valid data[].url or data[].b64_json image output"))
 			return
 		}
 		if err := h.tasks.Complete(context.Background(), taskID, statusCode, json.RawMessage(body)); err != nil {
@@ -203,6 +222,8 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 }
 
 func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json.RawMessage) {
+	taskErr = json.RawMessage(errordetail.Body(taskErr))
+	logger.L().Warn("image_task.execution_failed", zap.String("task_id", taskID), zap.Int("status", statusCode), zap.String("error", string(taskErr)))
 	if err := h.tasks.Fail(context.Background(), taskID, statusCode, taskErr); err != nil {
 		logger.L().Error("image_task.failure_store_failed", zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -245,16 +266,18 @@ func imageTaskPollURL(submitPath, taskID string) string {
 }
 
 func extractImageTaskError(body []byte) json.RawMessage {
-	if json.Valid(body) {
-		var envelope struct {
-			Error json.RawMessage `json:"error"`
-		}
-		if json.Unmarshal(body, &envelope) == nil && len(envelope.Error) > 0 && json.Valid(envelope.Error) {
-			return envelope.Error
-		}
-		return json.RawMessage(body)
+	fields := errordetail.Fields(body)
+	if message, _ := fields["message"].(string); message == "" {
+		fields["message"] = "Image request failed without an error message"
 	}
-	return imageTaskErrorPayload("api_error", "image generation failed")
+	if _, ok := fields["type"]; !ok {
+		fields["type"] = "api_error"
+	}
+	if _, ok := fields["source"]; !ok {
+		fields["source"] = "upstream"
+	}
+	data, _ := json.Marshal(fields)
+	return data
 }
 
 func imageTaskErrorPayload(errorType, message string) json.RawMessage {

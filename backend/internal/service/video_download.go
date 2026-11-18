@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 )
 
@@ -58,8 +59,11 @@ func (s *OpenAIGatewayService) legacyDownloadClient() (*http.Client, func()) {
 				return nil, fmt.Errorf("video connection target rejected")
 			}
 			addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil || len(addresses) == 0 {
-				return nil, fmt.Errorf("video DNS lookup failed")
+			if err != nil {
+				return nil, fmt.Errorf("Resolve video file source DNS: %w", err)
+			}
+			if len(addresses) == 0 {
+				return nil, fmt.Errorf("Video file source DNS returned no IP addresses")
 			}
 			for _, ip := range addresses {
 				if !videoPublicIP(ip) {
@@ -67,13 +71,15 @@ func (s *OpenAIGatewayService) legacyDownloadClient() (*http.Client, func()) {
 				}
 			}
 			dialer := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+			var dialErrors []error
 			for _, ip := range addresses {
 				conn, e := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 				if e == nil {
 					return conn, nil
 				}
+				dialErrors = append(dialErrors, e)
 			}
-			return nil, fmt.Errorf("video connection failed")
+			return nil, fmt.Errorf("Connect to video file source: %w", errors.Join(dialErrors...))
 		},
 	}
 	var roundTripper http.RoundTripper = transport
@@ -133,12 +139,16 @@ func (s *OpenAIGatewayService) downloadLegacyVideo(ctx context.Context, c *gin.C
 		if task.Status != "succeeded" || meta.LastStatus != "completed" {
 			if task.Status == "failed" {
 				failure := legacyTaskFailure(task, account.GetOpenAIApiKey())
-				return videoError(409, "video_not_downloadable", fmt.Sprintf("Video generation failed [%s]: %s", failure["code"], failure["message"]))
+				message := fmt.Sprintf("Video generation failed [%s]: %s", failure["code"], failure["message"])
+				failure["upstream_message"] = failure["message"]
+				failure["message"] = message
+				failure["stage"] = "video_generation"
+				return &videoProtocolError{status: 409, code: "video_not_downloadable", message: message, diagnostic: failure}
 			}
 			return videoError(409, "video_not_downloadable", "Video task has no completed output")
 		}
 		if task.VideoURL == "" {
-			return videoError(503, "video_output_unavailable", "Upstream video output is temporarily unavailable")
+			return videoError(503, "video_output_unavailable", "Upstream task status=succeeded but its response contains no video_url")
 		}
 		target, err := validateVideoDownloadURL(task.VideoURL)
 		if err != nil {
@@ -152,23 +162,31 @@ func (s *OpenAIGatewayService) downloadLegacyVideo(ctx context.Context, c *gin.C
 		resp, err := client.Do(req)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return videoError(504, "video_download_timeout", "Video download timed out")
+				return videoCause(504, "video_download_timeout", "Video download timed out", err)
 			}
-			return videoError(502, "video_download_error", "Video file request failed")
+			return videoCause(502, "video_download_error", "Request video file from source", err)
 		}
 		if attempt == 0 && (resp.StatusCode == 403 || resp.StatusCode == 404) {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 65536))
+			slog.Warn("video_legacy.download_link_refresh", "task_id", id, "status", resp.StatusCode, "reason", errordetail.Message(body), "upstream_request_id", errordetail.RequestID(resp.Header), "read_error", safeVideoError(readErr))
 			resp.Body.Close()
 			continue
 		}
 		if resp.StatusCode != 200 {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 65536))
 			resp.Body.Close()
-			return videoError(502, "video_download_error", fmt.Sprintf("Video file source returned HTTP %d", resp.StatusCode))
+			failure := videoUpstreamError(502, "video_download_error", resp.StatusCode, resp.Header, body)
+			if readErr != nil {
+				failure.(*videoProtocolError).cause = readErr
+				failure.(*videoProtocolError).diagnostic["body_read_error"] = safeVideoError(readErr)
+			}
+			return failure
 		}
 		err = s.streamLegacyVideo(c, resp, time.Duration(idle)*time.Second)
 		resp.Body.Close()
 		if err != nil {
 			if c.Writer.Written() {
-				slog.Warn("video_legacy.download_interrupted", "task_id", id, "account_id", account.ID)
+				slog.Warn("video_legacy.download_interrupted", "task_id", id, "account_id", account.ID, "reason", safeVideoError(err))
 				// Re-panic through the recovery middleware so net/http emits an incomplete stream.
 				panic(http.ErrAbortHandler)
 			}

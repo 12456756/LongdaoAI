@@ -200,7 +200,7 @@ func TestCodexModelsReturnsLastUpstreamErrorWhenAccountsAreExhausted(t *testing.
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status: got %d, want %d; body=%s", recorder.Code, http.StatusBadGateway, recorder.Body.String())
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, "upstream error 504") {
+	if body := recorder.Body.String(); !strings.Contains(body, `"upstream_status":504`) || !strings.Contains(body, "No available OpenAI accounts") {
 		t.Fatalf("body does not preserve the last upstream error: %s", body)
 	}
 }
@@ -221,7 +221,7 @@ func TestCodexModelsHonorsAccountSwitchLimit(t *testing.T) {
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status: got %d, want %d; body=%s", recorder.Code, http.StatusBadGateway, recorder.Body.String())
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, "upstream error 504") {
+	if body := recorder.Body.String(); !strings.Contains(body, `"upstream_status":504`) || !strings.Contains(body, "No available OpenAI accounts") {
 		t.Fatalf("body does not preserve the limit-ending upstream error: %s", body)
 	}
 }

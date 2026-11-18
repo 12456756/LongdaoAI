@@ -123,7 +123,11 @@ func TestOpenAIVideosPriceGuardPreDispatchAndResponseIdentity(t *testing.T) {
 					} `json:"error"`
 				}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-				require.Equal(t, "video_pricing_changed", payload.Error.Code)
+				wantCode := "video_pricing_changed"
+				if scenario == "missing operation" || scenario == "duplicate version" || scenario == "oversize version" {
+					wantCode = "invalid_video_pricing_headers"
+				}
+				require.Equal(t, wantCode, payload.Error.Code)
 				require.Empty(t, usage.logs)
 			}
 		})

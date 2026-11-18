@@ -334,7 +334,7 @@ func TestVideoUsageHTTPSettlesOnlyReliableVideoEvidence(t *testing.T) {
 	}
 }
 
-func TestVideoUsageHTTPRejectsInvalidRequestIDAndHidesRepositoryError(t *testing.T) {
+func TestVideoUsageHTTPRejectsInvalidRequestIDAndPreservesRepositoryError(t *testing.T) {
 	repo := &videoUsageBillingRepo{err: errors.New("private database diagnostic")}
 	h, key := newVideoUsageHandlerForTest(repo)
 	for _, query := range []string{"", "request_id=", "request_id=a&request_id=b", "request_id=%0Areq-1", "request_id=with%20space", "request_id=%20req-1", "request_id=invalid%2Fpath", "request_id=" + url.QueryEscape(strings.Repeat("a", 257))} {
@@ -343,7 +343,7 @@ func TestVideoUsageHTTPRejectsInvalidRequestIDAndHidesRepositoryError(t *testing
 	}
 	recorder := videoBillingHTTP(t, h, key, http.MethodGet, "/v1/sub2api/videos/usage?request_id=req-1", "")
 	require.Equal(t, 503, recorder.Code)
-	require.NotContains(t, recorder.Body.String(), "private database diagnostic")
+	require.Contains(t, recorder.Body.String(), "Read video request billing: private database diagnostic")
 }
 
 func TestVideoUsageHTTPStrictSEPProjection(t *testing.T) {

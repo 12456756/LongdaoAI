@@ -560,6 +560,7 @@ urlFallbackLoop:
 			// 统一处理错误响应
 			if resp.StatusCode >= 400 {
 				respBody := s.readUpstreamErrorBody(resp)
+				CaptureUpstreamError(p.c, resp.StatusCode, resp.Header, respBody)
 				_ = resp.Body.Close()
 
 				if overagesInjected && shouldMarkCreditsExhausted(resp, respBody, nil) {

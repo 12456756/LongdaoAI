@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -425,7 +426,7 @@ func geminiBatchHasInlineResults(batch *GeminiBatchJob) bool {
 func geminiProviderError(reason, message string, cause error) error {
 	err := infraerrors.New(http.StatusBadGateway, reason, message)
 	if cause != nil {
-		return err.WithCause(cause)
+		return err.WithCause(safeDiagnosticCause(cause))
 	}
 	return err
 }
@@ -438,16 +439,16 @@ func mapGeminiClientError(err error) error {
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return geminiProviderError("GEMINI_AUTH_FAILED", "Gemini authentication failed", nil)
+			return geminiProviderError("GEMINI_AUTH_FAILED", sanitizeUpstreamErrorMessage(err.Error()), err)
 		case http.StatusTooManyRequests:
-			return geminiProviderError("GEMINI_RATE_LIMITED", "Gemini rate limit exceeded", nil)
+			return geminiProviderError("GEMINI_RATE_LIMITED", sanitizeUpstreamErrorMessage(err.Error()), err)
 		case http.StatusNotFound:
-			return geminiProviderError("GEMINI_BATCH_NOT_FOUND", "Gemini batch resource was not found", nil)
+			return geminiProviderError("GEMINI_BATCH_NOT_FOUND", sanitizeUpstreamErrorMessage(err.Error()), err)
 		default:
-			return geminiProviderError("GEMINI_INVALID_RESPONSE", "Gemini API request failed", nil)
+			return geminiProviderError("GEMINI_INVALID_RESPONSE", sanitizeUpstreamErrorMessage(err.Error()), err)
 		}
 	}
-	return geminiProviderError("GEMINI_INVALID_RESPONSE", "Gemini API request failed", nil)
+	return geminiProviderError("GEMINI_INVALID_RESPONSE", sanitizeUpstreamErrorMessage(err.Error()), err)
 }
 
 type GeminiBatchHTTPClient struct {
@@ -686,6 +687,7 @@ type GeminiAPIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	Diagnostic map[string]any
 }
 
 func (e *GeminiAPIError) Error() string {
@@ -693,26 +695,24 @@ func (e *GeminiAPIError) Error() string {
 		return "<nil>"
 	}
 	if e.Code != "" {
-		return fmt.Sprintf("gemini api error: status=%d code=%s message=%s", e.StatusCode, e.Code, e.Message)
+		return sanitizeUpstreamErrorMessage(fmt.Sprintf("gemini api error: status=%d code=%s message=%s", e.StatusCode, e.Code, e.Message))
 	}
-	return fmt.Sprintf("gemini api error: status=%d message=%s", e.StatusCode, e.Message)
+	return sanitizeUpstreamErrorMessage(fmt.Sprintf("gemini api error: status=%d message=%s", e.StatusCode, e.Message))
 }
 
 func readGeminiAPIError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	message := string(body)
-	var parsed struct {
-		Error struct {
-			Code    any    `json:"code"`
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	d := errordetail.Diagnostic(resp.StatusCode, resp.Header, body)
+	if readErr != nil {
+		d["body_read_error"] = errordetail.Text(readErr.Error())
 	}
-	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
-		message = parsed.Error.Message
-		return &GeminiAPIError{StatusCode: resp.StatusCode, Code: parsed.Error.Status, Message: message}
+	code := ""
+	if v := d["code"]; v != nil {
+		code = fmt.Sprint(v)
+	} else if v := d["status"]; v != nil {
+		code = fmt.Sprint(v)
 	}
-	return &GeminiAPIError{StatusCode: resp.StatusCode, Message: message}
+	return &GeminiAPIError{StatusCode: resp.StatusCode, Code: code, Message: fmt.Sprint(d["message"]), Diagnostic: d}
 }
 
 var _ BatchImageProvider = (*GeminiAPIBatchImageProvider)(nil)

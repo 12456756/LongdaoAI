@@ -93,18 +93,19 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", safeErr)
 		return fmt.Errorf("openai input_tokens upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Read upstream token count response: "+sanitizeUpstreamErrorMessage(err.Error()))
 		return fmt.Errorf("read input_tokens response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, respBody)
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if account.Type == AccountTypeOAuth && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
 			writeOpenAIOAuthInputTokensFallback(c, account, prepared, resp.StatusCode)
@@ -246,13 +247,7 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 }
 
 func writeAnthropicCountTokensError(c *gin.Context, status int, errType, message string) {
-	c.JSON(status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	writeUpstreamError(c, status, errType, message, true)
 }
 
 func isOpenAIInputTokensUnsupported(statusCode int, body []byte) bool {

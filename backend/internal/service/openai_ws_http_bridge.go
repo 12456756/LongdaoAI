@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -130,8 +131,8 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
-func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
-	message = strings.TrimSpace(message)
+func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string, diagnostic ...map[string]any) []byte {
+	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = http.StatusText(statusCode)
 	}
@@ -145,6 +146,11 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 			"type":    "upstream_error",
 			"message": message,
 		},
+	}
+	if len(diagnostic) > 0 {
+		event["error"] = errordetail.Value(diagnostic[0])
+	} else {
+		event["error"].(map[string]any)["source"] = "platform"
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -226,13 +232,18 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, safeErr))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
+		diagnostic := errordetail.Diagnostic(resp.StatusCode, resp.Header, respBody)
+		if readErr != nil {
+			diagnostic["body_read_error"] = sanitizeUpstreamErrorMessage(readErr.Error())
+		}
+		setOpsUpstreamError(c, resp.StatusCode, fmt.Sprint(diagnostic["message"]), string(errordetail.Body(respBody)))
 		if account.Platform == PlatformGrok {
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		} else if shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody) {
@@ -243,7 +254,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg))
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg, diagnostic))
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
 	if account.Platform == PlatformGrok {

@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -72,7 +73,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 	if shouldFallbackGeminiModels(res) {
-		c.JSON(http.StatusOK, gemini.FallbackModelsList())
+		writeGeminiCatalogFallback(c, res, gemini.FallbackModelsList())
 		return
 	}
 	writeUpstreamResponse(c, res)
@@ -125,7 +126,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		return
 	}
 	if shouldFallbackGeminiModel(modelName, res) {
-		c.JSON(http.StatusOK, gemini.FallbackModel(modelName))
+		writeGeminiCatalogFallback(c, res, gemini.FallbackModel(modelName))
 		return
 	}
 	writeUpstreamResponse(c, res)
@@ -483,6 +484,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				service.RecordFailoverDiagnostic(c, failoverErr)
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch failoverAction {
 				case FailoverContinue:
@@ -588,6 +590,7 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 
+	service.CaptureFailoverError(c, failoverErr)
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 
@@ -646,12 +649,15 @@ type pathParseError struct{ msg string }
 func (e *pathParseError) Error() string { return e.msg }
 
 func googleError(c *gin.Context, status int, message string) {
+	fields := service.GatewayErrorFields(c, "upstream_error", message)
+	if _, ok := fields["code"]; !ok {
+		fields["code"] = status
+	}
+	if _, ok := fields["status"]; !ok {
+		fields["status"] = googleapi.HTTPStatusToGoogleStatus(status)
+	}
 	c.JSON(status, gin.H{
-		"error": gin.H{
-			"code":    status,
-			"message": message,
-			"status":  googleapi.HTTPStatusToGoogleStatus(status),
-		},
+		"error": fields,
 	})
 }
 
@@ -674,6 +680,25 @@ func writeUpstreamResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
 		contentType = "application/json"
 	}
 	c.Data(res.StatusCode, contentType, res.Body)
+}
+
+func writeGeminiCatalogFallback(c *gin.Context, res *service.UpstreamHTTPResult, catalog any) {
+	c.Header("X-Models-Source", "fallback")
+	if res != nil {
+		c.Header("X-Upstream-Status", strconv.Itoa(res.StatusCode))
+		if id := errordetail.RequestID(res.Headers); id != "" {
+			c.Header("X-Upstream-Request-ID", id)
+		}
+		service.SetOpsUpstreamError(c, res.StatusCode, service.ExtractUpstreamErrorMessage(res.Body), string(errordetail.Body(res.Body)))
+	}
+	body, _ := json.Marshal(catalog)
+	var result gin.H
+	_ = json.Unmarshal(body, &result)
+	result["partial"], result["source"] = true, "fallback"
+	if res != nil {
+		result["diagnostics"] = []any{errordetail.Diagnostic(res.StatusCode, res.Headers, res.Body)}
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func shouldFallbackGeminiModels(res *service.UpstreamHTTPResult) bool {

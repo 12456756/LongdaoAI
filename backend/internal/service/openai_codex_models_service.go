@@ -16,6 +16,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/singleflight"
 )
@@ -42,6 +43,7 @@ type CodexModelsManifest struct {
 }
 
 type codexModelsManifestUpstreamError struct {
+	diagnostic map[string]any
 	err        error
 	retryable  bool
 	statusCode int
@@ -440,13 +442,14 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		body = s.redactAgentIdentitySensitiveBody(reqCtx, request.credentialAccount, body)
+		body = errordetail.Body(s.redactAgentIdentitySensitiveBody(reqCtx, request.credentialAccount, body))
 		message := strings.TrimSpace(string(body))
 		if message == "" {
 			message = resp.Status
 		}
 		return nil, &codexModelsManifestUpstreamError{
 			err:        infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest upstream error %d: %s", resp.StatusCode, message),
+			diagnostic: errordetail.Diagnostic(resp.StatusCode, resp.Header, body),
 			statusCode: resp.StatusCode,
 			body:       body,
 			retryable: resp.StatusCode == http.StatusTooManyRequests ||

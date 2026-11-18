@@ -10,6 +10,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -158,8 +159,8 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 		rewritten, err := s.uploader.Rewrite(ctx, id, result)
 		if err != nil {
 			// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
-			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
-			return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "failed to store generated image to object storage"))
+			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.String("reason", errordetail.Text(err.Error())))
+			return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("storage_error", "Failed to store generated image to object storage: "+errordetail.Text(err.Error())))
 		}
 		result = rewritten
 	}
@@ -168,9 +169,9 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 
 func (s *ImageTaskService) Fail(ctx context.Context, id string, statusCode int, taskErr json.RawMessage) error {
 	if !json.Valid(taskErr) {
-		taskErr = imageTaskErrorJSON("api_error", "image generation failed")
+		taskErr = imageTaskErrorJSON("api_error", errordetail.Message(taskErr))
 	}
-	return s.finish(ctx, id, ImageTaskStatusFailed, statusCode, nil, taskErr)
+	return s.finish(ctx, id, ImageTaskStatusFailed, statusCode, nil, errordetail.Body(taskErr))
 }
 
 func (s *ImageTaskService) finish(ctx context.Context, id, status string, statusCode int, result, taskErr json.RawMessage) error {
@@ -233,6 +234,6 @@ func firstImageTaskURL(result json.RawMessage) string {
 }
 
 func imageTaskErrorJSON(errorType, message string) json.RawMessage {
-	data, _ := json.Marshal(map[string]string{"type": errorType, "message": message})
+	data, _ := json.Marshal(map[string]string{"type": errorType, "message": errordetail.Text(message), "source": "platform"})
 	return data
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -137,7 +138,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingJSONEscaping(t *testi
 			h.handleStreamingAwareError(c, http.StatusBadGateway, tc.errType, tc.message, true)
 
 			_, errObj := parseResponsesFailedSSE(t, w.Body.String())
-			assert.Equal(t, tc.message, errObj["message"], "message 必须被原样还原")
+			assert.Equal(t, errordetail.Text(tc.message), errObj["message"], "message 必须被原样还原")
 		})
 	}
 }
@@ -172,7 +173,10 @@ func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testin
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`), "got: %q", body)
+	var event map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(body, "data: "))), &event))
+	assert.Equal(t, "error", event["type"])
+	assert.Equal(t, "boom", event["error"].(map[string]any)["message"])
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、

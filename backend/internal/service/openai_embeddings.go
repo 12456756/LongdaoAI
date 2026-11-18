@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -101,7 +102,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
-		writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "upstream_error", safeErr)
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -137,20 +138,30 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				ResponseHeaders:        resp.Header.Clone(),
 			}
 		}
-		writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, respBody)
+		setOpsUpstreamError(c, resp.StatusCode, extractUpstreamErrorMessage(respBody), string(respBody))
+		UseUpstreamError(c)
+		writeOpenAIEmbeddingsUpstreamResponse(c, resp, errordetail.Body(respBody), s.responseHeaderFilter)
 		return nil, fmt.Errorf("upstream returned status %d", resp.StatusCode)
 	}
 
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-			writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
+			writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "api_error", "Read upstream embeddings response: "+sanitizeUpstreamErrorMessage(err.Error()))
 		}
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	if UpstreamBodyError(respBody) {
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, respBody)
+		setOpsUpstreamError(c, resp.StatusCode, extractUpstreamErrorMessage(respBody), string(respBody))
+		writeUpstreamError(c, http.StatusBadGateway, "upstream_error", extractUpstreamErrorMessage(respBody), false)
+		return nil, fmt.Errorf("embeddings business failure: %s", extractUpstreamErrorMessage(respBody))
+	}
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{

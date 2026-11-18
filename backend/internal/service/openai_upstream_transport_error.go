@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -128,9 +129,12 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": "upstream_transport_error", "message": safeErr, "source": "platform", "stage": "upstream_transport"}})
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: openAITransportFailoverBody,
+		Cause:            err,
+		DiagnosticSource: "platform",
+		StatusCode:       http.StatusBadGateway,
+		ResponseBody:     body,
 	}
 }
 

@@ -222,7 +222,7 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 	if err != nil {
 		reqLog.Warn("openai_videos.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		if !c.Writer.Written() {
-			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Video upstream request failed")
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", localDiagnosticMessage("Forward video request", err, ""))
 		}
 		return
 	}

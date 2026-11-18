@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"io"
 	"math"
 	"net/http"
@@ -67,7 +69,7 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid image pricing request")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Decode image pricing request (maximum 4096 bytes): "+errordetail.Text(err.Error()))
 		return
 	}
 	var extra any
@@ -85,14 +87,22 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid model, operation, size, quality or n")
 		return
 	}
-	if !service.GroupAllowsImageGeneration(key.Group) || h.gatewayService == nil || !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", "Model is not available for this key")
+	if !service.GroupAllowsImageGeneration(key.Group) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", "Image/video generation is disabled for this API key group")
+		return
+	}
+	if h.gatewayService == nil {
+		h.errorResponse(c, http.StatusForbidden, "api_error", "Platform model validation service is not initialized")
+		return
+	}
+	if !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %q is not available for this API key group", request.Model))
 		return
 	}
 	now := time.Now().UTC()
 	quote, err := h.openAIGatewayService.QuoteImageBilling(c.Request.Context(), key, request.Model, request.Size, request.N, now)
 	if err != nil || quote == nil || math.IsNaN(quote.Multiplier) || math.IsInf(quote.Multiplier, 0) {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Image pricing is unavailable")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read image quote", err, "Quote is missing or its multiplier is not finite"))
 		return
 	}
 	response := imagePricingResponse{Object: "sub2api.image_pricing", SchemaVersion: 1, Currency: "USD", imagePricingRequest: request,
@@ -140,7 +150,7 @@ func (h *GatewayHandler) RequestImageUsage(c *gin.Context) {
 	}
 	evidence, err := h.openAIGatewayService.RequestImageBilling(c.Request.Context(), key, id)
 	if err != nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Request billing is unavailable")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read image request billing", err, ""))
 		return
 	}
 	response := requestUsageResponse{Object: "sub2api.request_usage", SchemaVersion: 1, Currency: "USD", RequestID: id,

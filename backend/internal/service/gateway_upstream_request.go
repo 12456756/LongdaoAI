@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -877,11 +878,12 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 }
 
 func truncateForLog(b []byte, maxBytes int) string {
+	b = errordetail.Body(b)
 	if maxBytes <= 0 {
 		maxBytes = 2048
 	}
 	if len(b) > maxBytes {
-		b = b[:maxBytes]
+		b = []byte(truncateString(string(b), maxBytes))
 	}
 	s := string(b)
 	// 保持一行，避免污染日志格式

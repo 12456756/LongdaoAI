@@ -96,6 +96,9 @@ func (p *BatchImageProviderProcessor) Process(ctx context.Context, batchID strin
 
 	status, err := provider.Get(ctx, job, account)
 	if err != nil {
+		if recordErr := p.Repo.AppendBatchImageEvent(ctx, job.BatchID, "provider_status_check_failed", map[string]any{"message": sanitizeBatchImagePublicMessage(err.Error()), "diagnostic": ProviderErrorDiagnostic(err)}); recordErr != nil {
+			logger.L().Warn("batch_image.provider_status_error_record_failed", zap.String("batch_id", job.BatchID), zap.String("reason", sanitizeUpstreamErrorMessage(recordErr.Error())))
+		}
 		logger.L().Warn("batch_image.provider_status_check_failed",
 			zap.String("batch_id", job.BatchID),
 			zap.String("provider", job.Provider),

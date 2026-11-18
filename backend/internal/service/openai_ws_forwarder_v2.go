@@ -632,12 +632,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				emitStreamMessage(message, true)
 			}
 			if !reqStream {
-				c.JSON(statusCode, gin.H{
-					"error": gin.H{
-						"type":    "upstream_error",
-						"message": errMsg,
-					},
-				})
+				CaptureUpstreamError(c, statusCode, nil, message)
+				writeUpstreamError(c, statusCode, "upstream_error", errMsg, false)
 			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}

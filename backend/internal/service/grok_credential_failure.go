@@ -160,7 +160,7 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 			reason:  GrokCredentialReasonFailoverTimeout,
 			action:  NextAccountStop,
 			message: "Grok OAuth credential failover budget exhausted",
-		})
+		}, err, credentialCtx.Err())
 	}
 
 	class := classifyGrokCredentialFailure(account, err)
@@ -176,6 +176,7 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 			return freshToken, "oauth", nil
 		}
 		if mutationErr != nil {
+			err = errors.Join(err, mutationErr)
 			if ctx.Err() != nil {
 				return "", "", ctx.Err()
 			}
@@ -185,7 +186,7 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 					reason:  GrokCredentialReasonFailoverTimeout,
 					action:  NextAccountStop,
 					message: "Grok OAuth credential failover budget exhausted",
-				})
+				}, err, credentialCtx.Err())
 			}
 			if errors.Is(mutationErr, errOAuthRefreshAccountStateChanged) {
 				class = grokCredentialFailureClass{
@@ -211,7 +212,7 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 			}
 		}
 	}
-	return "", "", s.newGrokCredentialFailover(c, account, class)
+	return "", "", s.newGrokCredentialFailover(c, account, class, err)
 }
 
 func grokCredentialAcquisitionContext(ctx context.Context, c *gin.Context) (context.Context, context.CancelFunc, bool) {
@@ -637,9 +638,13 @@ func grokCredentialProxyIDsEqual(left, right *int64) bool {
 	return *left == *right
 }
 
-func (s *OpenAIGatewayService) newGrokCredentialFailover(c *gin.Context, account *Account, class grokCredentialFailureClass) error {
+func (s *OpenAIGatewayService) newGrokCredentialFailover(c *gin.Context, account *Account, class grokCredentialFailureClass, causes ...error) error {
 	if strings.TrimSpace(class.message) == "" {
 		class.message = "Grok OAuth credentials are unavailable"
+	}
+	cause := safeDiagnosticCause(errors.Join(causes...))
+	if cause != nil {
+		class.message += ": " + cause.Error()
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:  PlatformGrok,
@@ -656,6 +661,7 @@ func (s *OpenAIGatewayService) newGrokCredentialFailover(c *gin.Context, account
 		Reason:            class.reason,
 		NextAccountAction: class.action,
 		ClientStatusCode:  http.StatusServiceUnavailable,
-		ClientMessage:     GrokCredentialUnavailableClientMessage,
+		ClientMessage:     class.message,
+		Cause:             cause,
 	}
 }

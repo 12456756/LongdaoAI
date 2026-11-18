@@ -54,7 +54,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.Nil(t, first.UpstreamStatusCode)
 	require.NotNil(t, first.UpstreamErrorMessage)
 	require.NotContains(t, *first.UpstreamErrorMessage, "secret-value")
-	require.Contains(t, *first.UpstreamErrorMessage, "access_token=***")
+	require.Contains(t, *first.UpstreamErrorMessage, "access_token=[redacted]")
 	require.NotNil(t, first.UpstreamErrorDetail)
 	require.NotContains(t, *first.UpstreamErrorDetail, "secret-token")
 	require.NotContains(t, first.ErrorBody, "secret")

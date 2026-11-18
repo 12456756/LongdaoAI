@@ -27,6 +27,7 @@ import (
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -335,7 +336,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 					} else {
-						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
+						h.handleFailoverExhaustedSimple(c, 502, streamStarted, err)
 					}
 					return
 				}
@@ -446,6 +447,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					service.RecordFailoverDiagnostic(c, failoverErr)
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
@@ -466,7 +468,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted, err)
 				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -623,7 +625,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)
 					} else {
-						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
+						h.handleFailoverExhaustedSimple(c, 502, streamStarted, err)
 					}
 					return
 				}
@@ -868,6 +870,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					service.RecordFailoverDiagnostic(c, failoverErr)
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
@@ -888,7 +891,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted, err)
 				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -1010,7 +1013,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	// Get available models from account configurations for the selected group platform.
-	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	availableModels, modelsErr := h.gatewayService.GetAvailableModelsWithError(c.Request.Context(), groupID, platform)
+	if modelsErr != nil {
+		markGatewayDataError(c, "models", modelsErr)
+	}
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
 		availableModels = service.ResolveEffectiveModels(availableModels, platform, apiKey.Group.ModelsListConfig)
 		writeCustomModelsList(c, platform, availableModels)
@@ -1025,20 +1031,20 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	// Fallback to default models. Preserve the response shape and model set of
 	// the existing platform-specific fallback branches.
 	if platform == service.PlatformGemini {
-		c.JSON(http.StatusOK, gin.H{
+		writeGatewayData(c, gin.H{
 			"object": "list",
 			"data":   geminicli.DefaultModels,
 		})
 		return
 	}
 	if platform == service.PlatformOpenAI {
-		c.JSON(http.StatusOK, gin.H{
+		writeGatewayData(c, gin.H{
 			"object": "list",
 			"data":   openai.DefaultModels,
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeGatewayData(c, gin.H{
 		"object": "list",
 		"data":   claude.DefaultModels,
 	})
@@ -1054,7 +1060,7 @@ func writeModelsList(c *gin.Context, modelIDs []string) {
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeGatewayData(c, gin.H{
 		"object": "list",
 		"data":   models,
 	})
@@ -1089,7 +1095,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 			DisplayName: modelID,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeGatewayData(c, gin.H{
 		"object": "list",
 		"data":   models,
 	})
@@ -1098,7 +1104,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 // AntigravityModels 返回 Antigravity 支持的全部模型
 // GET /antigravity/models
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	writeGatewayData(c, gin.H{
 		"object": "list",
 		"data":   antigravity.DefaultModels(),
 	})
@@ -1145,13 +1151,15 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 	}
 
 	// Best-effort: 获取用量统计（按当前 API Key 过滤），失败不影响基础响应
-	usageData := h.buildUsageData(ctx, apiKey.ID)
+	usageData := h.buildUsageData(ctx, apiKey.ID, c)
 	dailyUsage := h.buildAPIKeyDailyUsage(c, subject.UserID, apiKey.ID, days)
 
 	// Best-effort: 获取模型统计
 	var modelStats any
 	if h.usageService != nil {
-		if stats, err := h.usageService.GetAPIKeyModelStats(ctx, apiKey.ID, startTime, endTime); err == nil && len(stats) > 0 {
+		if stats, err := h.usageService.GetAPIKeyModelStats(ctx, apiKey.ID, startTime, endTime); err != nil {
+			markGatewayDataError(c, "model_stats", err)
+		} else if len(stats) > 0 {
 			modelStats = stats
 		}
 	}
@@ -1187,12 +1195,15 @@ func (h *GatewayHandler) parseUsageDateRange(c *gin.Context) (time.Time, time.Ti
 }
 
 // buildUsageData 构建 today/total 用量摘要
-func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin.H {
+func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, diagnostics ...*gin.Context) gin.H {
 	if h.usageService == nil {
 		return nil
 	}
 	dashStats, err := h.usageService.GetAPIKeyDashboardStats(ctx, apiKeyID)
 	if err != nil || dashStats == nil {
+		if err != nil && len(diagnostics) > 0 {
+			markGatewayDataError(diagnostics[0], "usage", err)
+		}
 		return nil
 	}
 	return gin.H{
@@ -1229,6 +1240,7 @@ func (h *GatewayHandler) buildAPIKeyDailyUsage(c *gin.Context, userID, apiKeyID 
 	startTime, endTime := apiKeyDailyUsageRange(days, c.Query("timezone"))
 	stats, err := h.usageService.GetAPIKeyDailyUsage(c.Request.Context(), userID, apiKeyID, startTime, endTime)
 	if err != nil {
+		markGatewayDataError(c, "daily_usage", err)
 		return nil
 	}
 	return stats
@@ -1258,6 +1270,9 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 	// 速率限制信息（从 DB 获取实时用量）
 	if apiKey.HasRateLimits() && h.apiKeyService != nil {
 		rateLimitData, err := h.apiKeyService.GetRateLimitData(ctx, apiKey.ID)
+		if err != nil {
+			markGatewayDataError(c, "rate_limits", err)
+		}
 		if err == nil && rateLimitData != nil {
 			var rateLimits []gin.H
 			if apiKey.RateLimit5h > 0 {
@@ -1324,7 +1339,7 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 		resp["model_stats"] = modelStats
 	}
 
-	c.JSON(http.StatusOK, resp)
+	writeGatewayData(c, resp)
 }
 
 // usageUnrestricted 处理 unrestricted 模式的响应（向后兼容）
@@ -1364,7 +1379,7 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 		if modelStats != nil {
 			resp["model_stats"] = modelStats
 		}
-		c.JSON(http.StatusOK, resp)
+		writeGatewayData(c, resp)
 		return
 	}
 
@@ -1392,7 +1407,7 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 	if modelStats != nil {
 		resp["model_stats"] = modelStats
 	}
-	c.JSON(http.StatusOK, resp)
+	writeGatewayData(c, resp)
 }
 
 // calculateSubscriptionRemaining 计算订阅剩余可用额度
@@ -1451,6 +1466,7 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
+	service.CaptureFailoverError(c, failoverErr)
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
@@ -1493,8 +1509,12 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
-func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
+func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool, causes ...error) {
+	status, errType, _ := h.mapUpstreamError(statusCode)
+	errMsg := "Account selection failed without a recorded cause or upstream response"
+	if len(causes) > 0 && causes[0] != nil {
+		errMsg = localDiagnosticMessage("Select account after failed attempts", causes[0], "")
+	}
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -1518,6 +1538,8 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 
 // handleStreamingAwareError handles errors that may occur after streaming has started
 func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	fields := service.GatewayErrorFields(c, errType, message)
+	message, _ = fields["message"].(string)
 	if streamStarted {
 		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
 		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
@@ -1536,7 +1558,8 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
 			// SSE 错误事件固定 schema，使用 Quote 直拼可避免额外 Marshal 分配。
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			eventBody, _ := json.Marshal(gin.H{"type": "error", "error": fields})
+			errorEvent := "data: " + string(eventBody) + "\n\n"
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
 			}
@@ -1553,7 +1576,7 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 // Writer 已被写过时（ping 已 flush）走 streamStarted 分支，
 // 让 handleStreamingAwareError 通过 SSE 发协议合规的终止事件，
 // 否则下游收到的就是 silent EOF。
-func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool) bool {
+func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool, causes ...error) bool {
 	if c == nil || c.Writer == nil {
 		return false
 	}
@@ -1563,7 +1586,11 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	if c.Writer.Written() {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+	message := "Forwarding failed without a recorded cause"
+	if len(causes) > 0 && causes[0] != nil {
+		message = localDiagnosticMessage("Forward model request", causes[0], "")
+	}
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", message, streamStarted)
 	return true
 }
 
@@ -1638,13 +1665,7 @@ func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 
 // errorResponse 返回Claude API格式的错误响应
 func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
-	c.JSON(status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	c.JSON(status, gin.H{"type": "error", "error": service.GatewayErrorFields(c, errType, message)})
 }
 
 // CountTokens handles token counting endpoint
@@ -2032,6 +2053,9 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
 	}
 	msg := pkgerrors.Message(err)
+	if err != nil && (msg == "" || msg == "internal error") {
+		msg = errordetail.Text(err.Error())
+	}
 	if msg == "" {
 		logger.L().With(
 			zap.String("component", "handler.gateway.billing"),
@@ -2039,7 +2063,11 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		).Warn("gateway.billing_error_missing_message")
 		msg = "Billing error"
 	}
-	return http.StatusForbidden, "billing_error", msg, 0
+	var appErr *pkgerrors.ApplicationError
+	if err != nil && !errors.As(err, &appErr) {
+		return http.StatusForbidden, "billing_service_error", msg, 0
+	}
+	return http.StatusForbidden, "billing_error", errordetail.Text(msg), 0
 }
 
 func (h *GatewayHandler) metadataBridgeEnabled() bool {

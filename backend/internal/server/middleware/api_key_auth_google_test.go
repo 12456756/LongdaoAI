@@ -475,7 +475,7 @@ func TestApiKeyAuthWithSubscriptionGoogle_RepoError(t *testing.T) {
 	var resp googleErrorResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, http.StatusInternalServerError, resp.Error.Code)
-	require.Equal(t, "Failed to validate API key", resp.Error.Message)
+	require.Equal(t, "Validate API key in platform storage: get api key: db down", resp.Error.Message)
 	require.Equal(t, "INTERNAL", resp.Error.Status)
 }
 

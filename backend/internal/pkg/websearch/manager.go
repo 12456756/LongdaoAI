@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -99,6 +100,7 @@ func (m *Manager) SearchWithBestProvider(ctx context.Context, req SearchRequest)
 
 	selected := m.selectByQuotaWeight(ctx, candidates)
 
+	var failures []error
 	for _, cfg := range selected {
 		allowed, incremented := m.tryReserveQuota(ctx, cfg)
 		if !allowed {
@@ -106,6 +108,7 @@ func (m *Manager) SearchWithBestProvider(ctx context.Context, req SearchRequest)
 		}
 		resp, err := m.executeSearch(ctx, cfg, req)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", cfg.Type, err))
 			if incremented {
 				m.rollbackQuota(ctx, cfg)
 			}
@@ -130,8 +133,18 @@ func (m *Manager) SearchWithBestProvider(ctx context.Context, req SearchRequest)
 		}
 		return resp, cfg.Type, nil
 	}
-	return nil, "", fmt.Errorf("websearch: no available provider (all exhausted or failed)")
+	if len(failures) > 0 {
+		return nil, "", &providerAttemptsError{cause: errors.Join(failures...)}
+	}
+	return nil, "", fmt.Errorf("websearch: no provider quota reservation was available")
 }
+
+type providerAttemptsError struct{ cause error }
+
+func (e *providerAttemptsError) Error() string {
+	return "websearch provider attempts failed: " + errordetail.Text(e.cause.Error())
+}
+func (e *providerAttemptsError) Unwrap() error { return e.cause }
 
 // filterAvailableProviders returns providers that have API keys, are not expired,
 // and whose proxies are not marked unavailable.

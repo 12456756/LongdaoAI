@@ -875,6 +875,13 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, err
 	}
+	if UpstreamBodyError(body) {
+		failure := openAIImagesUpstreamErrorFromHTTP(http.StatusBadGateway, resp.Header, body)
+		failure.Diagnostic["upstream_status"] = resp.StatusCode
+		setOpsUpstreamError(c, resp.StatusCode, failure.Message, string(body))
+		writeOpenAIImagesUpstreamErrorResponse(c, failure)
+		return OpenAIUsage{}, 0, nil, failure
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := "application/json"
 	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {

@@ -106,24 +106,25 @@ type BatchImagePricingSnapshot struct {
 }
 
 type BatchImagePublicBatch struct {
-	ID              string   `json:"id"`
-	Object          string   `json:"object"`
-	TaskName        string   `json:"task_name"`
-	ParentBatchID   *string  `json:"parent_batch_id,omitempty"`
-	Status          string   `json:"status"`
-	Model           string   `json:"model"`
-	Provider        string   `json:"provider"`
-	ItemCount       int      `json:"item_count"`
-	SuccessCount    int      `json:"success_count"`
-	FailCount       int      `json:"fail_count"`
-	EstimatedCost   float64  `json:"estimated_cost"`
-	HoldAmount      float64  `json:"hold_amount"`
-	ActualCost      *float64 `json:"actual_cost"`
-	CreatedAt       int64    `json:"created_at"`
-	SubmittedAt     *int64   `json:"submitted_at"`
-	SettledAt       *int64   `json:"settled_at"`
-	DownloadedAt    *int64   `json:"downloaded_at,omitempty"`
-	OutputDeletedAt *int64   `json:"output_deleted_at,omitempty"`
+	Error           *BatchImagePublicError `json:"error,omitempty"`
+	ID              string                 `json:"id"`
+	Object          string                 `json:"object"`
+	TaskName        string                 `json:"task_name"`
+	ParentBatchID   *string                `json:"parent_batch_id,omitempty"`
+	Status          string                 `json:"status"`
+	Model           string                 `json:"model"`
+	Provider        string                 `json:"provider"`
+	ItemCount       int                    `json:"item_count"`
+	SuccessCount    int                    `json:"success_count"`
+	FailCount       int                    `json:"fail_count"`
+	EstimatedCost   float64                `json:"estimated_cost"`
+	HoldAmount      float64                `json:"hold_amount"`
+	ActualCost      *float64               `json:"actual_cost"`
+	CreatedAt       int64                  `json:"created_at"`
+	SubmittedAt     *int64                 `json:"submitted_at"`
+	SettledAt       *int64                 `json:"settled_at"`
+	DownloadedAt    *int64                 `json:"downloaded_at,omitempty"`
+	OutputDeletedAt *int64                 `json:"output_deleted_at,omitempty"`
 }
 
 type BatchImagePublicItem struct {
@@ -353,7 +354,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	<-hbDone
 	if err != nil {
 		if releaseErr := s.releaseFailedSubmitHold(ctx, job, requestHash); releaseErr != nil {
-			return nil, releaseErr
+			return nil, infraerrors.New(infraerrors.Code(releaseErr), infraerrors.Reason(releaseErr), sanitizeBatchImagePublicMessage(fmt.Sprintf("Image provider submit failed: %v; releasing billing reservation also failed: %v", err, releaseErr))).WithCause(errors.Join(err, releaseErr))
 		}
 		publicErr := batchImageProviderSubmitPublicError(err)
 		reason := batchImageProviderSubmitRecordCode(publicErr)
@@ -1159,7 +1160,12 @@ func BatchImageJobToPublic(job *BatchImageJob) *BatchImagePublicBatch {
 	if job.HoldAmount != nil {
 		holdAmount = *job.HoldAmount
 	}
+	var failure *BatchImagePublicError
+	if job.LastErrorCode != nil || job.LastErrorMessage != nil {
+		failure = &BatchImagePublicError{Code: batchImageDerefString(job.LastErrorCode), Message: sanitizeBatchImagePublicMessage(batchImageDerefString(job.LastErrorMessage))}
+	}
 	return &BatchImagePublicBatch{
+		Error:           failure,
 		ID:              job.BatchID,
 		Object:          "image.batch",
 		TaskName:        batchImagePublicTaskName(job),
@@ -1333,7 +1339,7 @@ func batchImageProviderSubmitPublicError(err error) error {
 	case "BATCH_IMAGE_PROVIDER_UNSUPPORTED_ACCOUNT":
 		return ErrBatchImageProviderUnsupportedAccount
 	default:
-		return ErrBatchImageProviderSubmitFailed
+		return infraerrors.New(infraerrors.Code(ErrBatchImageProviderSubmitFailed), infraerrors.Reason(ErrBatchImageProviderSubmitFailed), sanitizeBatchImagePublicMessage(err.Error())).WithCause(err)
 	}
 }
 
@@ -1409,14 +1415,9 @@ func sanitizeBatchImageMetadata(in map[string]string) map[string]string {
 
 func sanitizeBatchImagePublicMessage(message string) string {
 	message = strings.TrimSpace(message)
-	for _, marker := range []string{"gs://", "files/", "projects/"} {
-		if strings.Contains(message, marker) {
-			message = "upstream provider operation failed"
-			break
-		}
-	}
+	message = sanitizeUpstreamErrorMessage(message)
 	if len(message) > maxBatchImagePublicErrorChars {
-		message = message[:maxBatchImagePublicErrorChars]
+		message = truncateString(message, maxBatchImagePublicErrorChars)
 	}
 	return message
 }

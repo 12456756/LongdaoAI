@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
@@ -354,7 +355,10 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if resp.StatusCode >= 400 {
 		responseBody := s.readUpstreamErrorBody(resp)
 		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, billingModel)
-		writeOpenAIEmbeddingsUpstreamResponse(c, resp, responseBody, s.responseHeaderFilter)
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, responseBody)
+		setOpsUpstreamError(c, resp.StatusCode, extractUpstreamErrorMessage(responseBody), string(responseBody))
+		UseUpstreamError(c)
+		writeOpenAIEmbeddingsUpstreamResponse(c, resp, errordetail.Body(responseBody), s.responseHeaderFilter)
 		return nil, fmt.Errorf("video upstream returned status %d", resp.StatusCode)
 	}
 	if content {
@@ -376,7 +380,13 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if request != nil {
 		result.ResponseID = firstNonEmptyString(gjson.GetBytes(responseBody, "id").String(), gjson.GetBytes(responseBody, "request_id").String(), gjson.GetBytes(responseBody, "data.id").String())
 		if result.ResponseID == "" {
-			return nil, errors.New("video upstream returned no task ID")
+			if UpstreamBodyError(responseBody) {
+				CaptureUpstreamError(c, resp.StatusCode, resp.Header, responseBody)
+				setOpsUpstreamError(c, resp.StatusCode, extractUpstreamErrorMessage(responseBody), string(responseBody))
+				writeUpstreamError(c, 502, "video_upstream_error", extractUpstreamErrorMessage(responseBody), false)
+				return nil, errors.New(extractUpstreamErrorMessage(responseBody))
+			}
+			return nil, errors.New("Video create response does not contain id, request_id, or data.id")
 		}
 		bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		err := s.cache.SetSessionAccountID(bindCtx, derefGroupID(apiKey.GroupID), videoTaskCacheKey(apiKey.ID, result.ResponseID), account.ID, openAIVideoTaskTTL)
