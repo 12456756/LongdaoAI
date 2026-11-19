@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"image/png"
+	imagecodec "image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -14,6 +17,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
 )
 
 const videoMultipartFieldsMaxBytes = 2 << 20
@@ -26,7 +33,18 @@ type videoReferenceInput struct {
 	data          []byte
 	size          int64
 	sha256        string
+	mimeType      string
+	extension     string
 	width, height int
+}
+
+func videoImageFormat(format string) (mimeType, extension string, ok bool) {
+	extension = "." + format
+	if format == "jpeg" {
+		extension = ".jpg"
+	}
+	mimeType, ok = videoImageMimeType(extension)
+	return mimeType, extension, ok
 }
 
 func (image videoReferenceInput) open() (io.ReadCloser, error) {
@@ -46,21 +64,25 @@ func (image *videoReferenceInput) validate(index int) error {
 	} else {
 		image.size = int64(len(image.data))
 	}
-	if image.size == 0 || image.size > videoPNGMaxBytes {
+	if image.size == 0 || image.size > videoReferenceImageMaxBytes {
 		status := 400
-		if image.size > videoPNGMaxBytes {
+		if image.size > videoReferenceImageMaxBytes {
 			status = 413
 		}
-		return videoError(status, "invalid_request_error", fmt.Sprintf("input_reference[%d] size %d bytes; allowed 1..%d bytes", index, image.size, videoPNGMaxBytes))
+		return videoError(status, "invalid_request_error", fmt.Sprintf("input_reference[%d] size %d bytes; allowed 1..%d bytes", index, image.size, videoReferenceImageMaxBytes))
 	}
 	file, err := image.open()
 	if err != nil {
 		return videoError(503, "video_upload_storage_error", fmt.Sprintf("Open input_reference[%d]: %s", index, err))
 	}
-	config, err := png.DecodeConfig(file)
+	config, format, err := imagecodec.DecodeConfig(file)
 	file.Close()
 	if err != nil {
-		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] is not a valid PNG: %s", index, err))
+		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] is not a valid image: %s", index, err))
+	}
+	mimeType, extension, ok := videoImageFormat(format)
+	if !ok {
+		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] has unsupported image format %q", index, format))
 	}
 	if config.Width < 1 || config.Height < 1 || config.Width > 4096 || config.Height > 4096 || int64(config.Width)*int64(config.Height) > 16777216 {
 		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] dimensions %dx%d; allowed width/height 1..4096 and at most 16777216 pixels", index, config.Width, config.Height))
@@ -69,10 +91,13 @@ func (image *videoReferenceInput) validate(index int) error {
 	if err != nil {
 		return videoError(503, "video_upload_storage_error", fmt.Sprintf("Open input_reference[%d] for decoding: %s", index, err))
 	}
-	_, err = png.Decode(file)
+	_, decodedFormat, err := imagecodec.Decode(file)
 	file.Close()
-	if err != nil {
-		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] PNG decoding failed: %s", index, err))
+	if err != nil || decodedFormat != format {
+		if err == nil {
+			err = fmt.Errorf("image format changed between validation passes")
+		}
+		return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference[%d] image decoding failed: %s", index, err))
 	}
 	file, err = image.open()
 	if err != nil {
@@ -85,6 +110,7 @@ func (image *videoReferenceInput) validate(index int) error {
 		return videoError(503, "video_upload_storage_error", fmt.Sprintf("Hash input_reference[%d]: %s", index, err))
 	}
 	image.sha256 = hex.EncodeToString(hash.Sum(nil))
+	image.mimeType, image.extension = mimeType, extension
 	image.width, image.height = config.Width, config.Height
 	return nil
 }
@@ -94,7 +120,7 @@ func (r *OpenAIVideoRequest) ValidateVideoReferences(protocol, operation string)
 		return nil
 	}
 	if r.otherFiles != 0 || len(r.moderation.InputImageURLs) != 0 {
-		return videoError(422, "unsupported_parameter", "Only input_reference PNG uploads are supported")
+		return videoError(422, "unsupported_parameter", "Only input_reference image uploads are supported")
 	}
 	count := len(r.moderation.Uploads)
 	if r.bodyPath != "" {
@@ -283,7 +309,9 @@ func (r *OpenAIVideoRequest) VisitModerationBodies(visit func([]byte) bool) erro
 			upload.Data = data
 		}
 		// Use the format verified by ValidateVideoReferences, not the client header.
-		upload.ContentType = "image/png"
+		if i < len(r.legacyImages) {
+			upload.ContentType = r.legacyImages[i].mimeType
+		}
 		info.Uploads = []OpenAIImagesUpload{upload}
 		if !visit(info.ModerationBody()) {
 			return nil

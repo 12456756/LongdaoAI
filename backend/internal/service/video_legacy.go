@@ -229,7 +229,7 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 		return nil, nil, err
 	}
 	if request.otherFiles != 0 || len(request.moderation.InputImageURLs) != 0 {
-		return nil, nil, videoError(422, "unsupported_parameter", "Only input_reference PNG uploads are supported")
+		return nil, nil, videoError(422, "unsupported_parameter", "Only input_reference image uploads are supported")
 	}
 	switch model {
 	case "seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.5":

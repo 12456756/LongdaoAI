@@ -389,6 +389,16 @@ func TestVideoReferenceSigningExpiryCleanupAndIsolation(t *testing.T) {
 	ref, e := runtime.save(context.Background(), &APIKey{ID: 4}, original)
 	require.NoError(t, e)
 	require.Equal(t, int64(604800), ref.ExpiresAt-ref.CreatedAt)
+	// Old manifests have no image_extension field and must still expire correctly.
+	manifestPath := filepath.Join(cfg.VideoLegacy.ReferenceDir, filepath.Dir(filepath.FromSlash(ref.RelativePath)), "manifest.json")
+	manifestData, e := os.ReadFile(manifestPath)
+	require.NoError(t, e)
+	var manifest map[string]any
+	require.NoError(t, json.Unmarshal(manifestData, &manifest))
+	delete(manifest, "image_extension")
+	manifestData, e = json.Marshal(manifest)
+	require.NoError(t, e)
+	require.NoError(t, os.WriteFile(manifestPath, manifestData, 0600))
 	svc := &OpenAIGatewayService{cfg: cfg, cache: store, videoReferenceRuntime: runtime}
 	svc.videoReferenceOnce.Do(func() {})
 	fetch := func(raw, method string) *httptest.ResponseRecorder {

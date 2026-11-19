@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"image"
+	"image/gif"
+	"image/jpeg"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,9 +23,135 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/image/bmp"
+	"golang.org/x/image/tiff"
 )
+
+func videoTestImage(t *testing.T, format string) []byte {
+	t.Helper()
+	var data bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	var err error
+	switch format {
+	case "png":
+		return legacyTestPNG(t)
+	case "jpeg":
+		err = jpeg.Encode(&data, img, nil)
+	case "gif":
+		err = gif.Encode(&data, img, nil)
+	case "bmp":
+		err = bmp.Encode(&data, img)
+	case "tiff":
+		err = tiff.Encode(&data, img, nil)
+	case "webp":
+		decoded, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+		require.NoError(t, err)
+		return decoded
+	default:
+		t.Fatalf("unknown test image format %q", format)
+	}
+	require.NoError(t, err)
+	return data.Bytes()
+}
+
+func TestLegacyVideoReferenceImageFormats(t *testing.T) {
+	for _, tc := range []struct {
+		format, mimeType, extension string
+	}{
+		{"png", "image/png", ".png"},
+		{"jpeg", "image/jpeg", ".jpg"},
+		{"webp", "image/webp", ".webp"},
+		{"gif", "image/gif", ".gif"},
+		{"bmp", "image/bmp", ".bmp"},
+		{"tiff", "image/tiff", ".tiff"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			original := videoTestImage(t, tc.format)
+			// The multipart fixture deliberately labels every file as .png/octet-stream.
+			body, ct := videoMultipartFixture(t, original)
+			request, err := ParseOpenAIVideoUpload(bytes.NewReader(body), ct)
+			require.NoError(t, err)
+			defer request.Close()
+			require.NoError(t, request.ValidateVideoReferences(VideoProtocolLegacy, "image-to-video"))
+			require.Len(t, request.legacyImages, 1)
+			require.Equal(t, tc.mimeType, request.legacyImages[0].mimeType)
+			visited := 0
+			require.NoError(t, request.VisitModerationBodies(func(body []byte) bool {
+				visited++
+				require.Contains(t, string(body), "data:"+tc.mimeType+";base64,"+base64.StdEncoding.EncodeToString(original))
+				return true
+			}))
+			require.Equal(t, 1, visited)
+			store := newVideoMemoryStore()
+			svc := &OpenAIGatewayService{cfg: legacyTestConfig(t), cache: store}
+			t.Cleanup(svc.CloseOpenAIWSPool)
+			calls := 0
+			svc.httpUpstream = videoTestUpstream{do: func(r *http.Request) (*http.Response, error) {
+				calls++
+				var payload struct {
+					Params struct {
+						Content []struct {
+							ImageURL struct{ URL string } `json:"image_url"`
+						}
+					}
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+				require.Len(t, payload.Params.Content, 2)
+				u, err := url.Parse(payload.Params.Content[1].ImageURL.URL)
+				require.NoError(t, err)
+				require.Equal(t, tc.extension, filepath.Ext(u.Path))
+				for _, method := range []string{http.MethodGet, http.MethodHead} {
+					w := httptest.NewRecorder()
+					svc.ServeVideoReference(w, httptest.NewRequest(method, u.String(), nil), filepath.Base(u.Path))
+					require.Equal(t, 200, w.Code)
+					require.Equal(t, tc.mimeType, w.Header().Get("Content-Type"))
+					if method == http.MethodGet {
+						require.Equal(t, original, w.Body.Bytes())
+					} else {
+						require.Empty(t, w.Body.Bytes())
+					}
+				}
+				forged := *u
+				forged.Path = strings.TrimSuffix(u.Path, tc.extension) + ".invalid"
+				w := httptest.NewRecorder()
+				svc.ServeVideoReference(w, httptest.NewRequest(http.MethodGet, forged.String(), nil), filepath.Base(forged.Path))
+				require.Equal(t, 403, w.Code)
+				forged.Path = strings.TrimSuffix(u.Path, tc.extension) + ".jpg"
+				if tc.extension == ".jpg" {
+					forged.Path = strings.TrimSuffix(u.Path, tc.extension) + ".png"
+				}
+				w = httptest.NewRecorder()
+				svc.ServeVideoReference(w, httptest.NewRequest(http.MethodGet, forged.String(), nil), filepath.Base(forged.Path))
+				require.Equal(t, 403, w.Code)
+				return legacyTestResponse(202, "seedance-2.0", "queued", ""), nil
+			}}
+			c, w := videoTestContext("POST", "/v1/videos", nil, ct)
+			c.Request.Header.Set("X-Video-Operation", "image-to-video")
+			_, err = svc.ForwardVideo(context.Background(), c, legacyTestAccount(), &APIKey{ID: 8}, request, "", false, "")
+			require.NoError(t, err)
+			require.Equal(t, 202, w.Code)
+			require.Equal(t, 1, calls)
+			require.Len(t, store.references, 1)
+			for _, ref := range store.references {
+				require.Equal(t, tc.mimeType, ref.MimeType)
+				require.Equal(t, "input"+tc.extension, filepath.Base(ref.RelativePath))
+				stored, err := os.ReadFile(filepath.Join(svc.cfg.VideoLegacy.ReferenceDir, filepath.FromSlash(ref.RelativePath)))
+				require.NoError(t, err)
+				require.Equal(t, original, stored)
+				runtime := svc.videoReferenceRuntime
+				runtime.cancel()
+				<-runtime.done
+				runtime.now = func() time.Time { return time.Unix(ref.ExpiresAt, 0) }
+				runtime.cleanup(context.Background())
+				_, err = os.Stat(filepath.Join(svc.cfg.VideoLegacy.ReferenceDir, filepath.FromSlash(ref.RelativePath)))
+				require.True(t, os.IsNotExist(err))
+			}
+		})
+	}
+}
 
 func videoMultipartFixture(t *testing.T, images ...[]byte) ([]byte, string) {
 	return videoMultipartFixtureForModel(t, "seedance-2.0", images...)
@@ -127,7 +257,9 @@ func (videoZeroReader) Read(p []byte) (int, error) {
 
 func TestLegacyVideoMultipartLimits(t *testing.T) {
 	valid := legacyTestPNG(t)
-	full := sizedVideoPNG(valid, videoPNGMaxBytes+1)
+	full := sizedVideoPNG(valid, videoReferenceImageMaxBytes+1)
+	var wideJPEG bytes.Buffer
+	require.NoError(t, jpeg.Encode(&wideJPEG, image.NewRGBA(image.Rect(0, 0, 4097, 1)), nil))
 	for _, tc := range []struct {
 		name    string
 		images  [][]byte
@@ -135,8 +267,11 @@ func TestLegacyVideoMultipartLimits(t *testing.T) {
 		message string
 	}{
 		{"empty", nil, 400, "count 0; allowed 1..9"},
+		{"empty image", [][]byte{{}}, 400, "size 0 bytes"},
 		{"too many", [][]byte{valid, valid, valid, valid, valid, valid, valid, valid, valid, valid}, 400, "count 10; allowed 1..9"},
-		{"bad second image", [][]byte{valid, []byte("not a PNG")}, 400, "input_reference[2] is not a valid PNG"},
+		{"bad second image", [][]byte{valid, []byte("not an image")}, 400, "input_reference[2] is not a valid image"},
+		{"truncated image", [][]byte{valid[:len(valid)-12]}, 400, "image decoding failed"},
+		{"oversized dimensions", [][]byte{wideJPEG.Bytes()}, 400, "dimensions 4097x1"},
 		{"too large by a byte", [][]byte{valid, full}, 413, "input_reference[2] size 10485761 bytes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,7 +289,7 @@ func TestLegacyVideoMultipartLimits(t *testing.T) {
 }
 
 func TestLegacyVideoTwoConcurrentFullUploads(t *testing.T) {
-	full := sizedVideoPNG(legacyTestPNG(t), videoPNGMaxBytes)
+	full := sizedVideoPNG(legacyTestPNG(t), videoReferenceImageMaxBytes)
 	digest := sha256.Sum256(full)
 	var prefix bytes.Buffer
 	form := multipart.NewWriter(&prefix)
@@ -229,7 +364,7 @@ func (s *batchVideoReferenceStore) VideoSaveReference(ctx context.Context, ref *
 
 func TestLegacyVideoMultiReferenceOrderReplayAndRollback(t *testing.T) {
 	first := legacyTestPNG(t)
-	second := sizedVideoPNG(first, len(first)+20)
+	second := videoTestImage(t, "jpeg")
 	store := &batchVideoReferenceStore{videoMemoryStore: newVideoMemoryStore(), failAt: 2}
 	cfg := legacyTestConfig(t)
 	svc := &OpenAIGatewayService{cfg: cfg, cache: store}

@@ -28,7 +28,7 @@ import (
 )
 
 const VideoUploadMaxBytes int64 = 92 << 20
-const videoPNGMaxBytes = 10 << 20
+const videoReferenceImageMaxBytes = 10 << 20
 
 var videoAssetPattern = regexp.MustCompile(`^vref_[a-f0-9]{32}$`)
 
@@ -113,23 +113,24 @@ func (s *OpenAIGatewayService) AcquireVideoUpload(ctx context.Context) (func(), 
 }
 
 type videoReferenceManifest struct {
-	SchemaVersion int    `json:"schema_version"`
-	AssetID       string `json:"asset_id"`
-	CreatedAt     int64  `json:"created_at"`
-	ExpiresAt     int64  `json:"expires_at"`
-	SHA256        string `json:"sha256"`
-	ByteLength    int64  `json:"byte_length"`
+	SchemaVersion  int    `json:"schema_version"`
+	AssetID        string `json:"asset_id"`
+	ImageExtension string `json:"image_extension,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	ExpiresAt      int64  `json:"expires_at"`
+	SHA256         string `json:"sha256"`
+	ByteLength     int64  `json:"byte_length"`
 }
 
-func (r *videoReferenceRuntime) unsigned(asset string, expires int64, kid string) string {
+func (r *videoReferenceRuntime) unsigned(asset, extension string, expires int64, kid string) string {
 	query := url.Values{"expires": {strconv.FormatInt(expires, 10)}, "kid": {kid}}
-	return strings.TrimRight(r.cfg.PublicBaseURL, "/") + "/media/video-inputs/" + asset + ".png?" + query.Encode()
+	return strings.TrimRight(r.cfg.PublicBaseURL, "/") + "/media/video-inputs/" + asset + extension + "?" + query.Encode()
 }
 
-func (r *videoReferenceRuntime) sign(asset string, expires int64, kid string) string {
+func (r *videoReferenceRuntime) sign(asset, extension string, expires int64, kid string) string {
 	key, _ := base64.StdEncoding.DecodeString(r.cfg.SigningKeys[kid])
 	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(r.unsigned(asset, expires, kid)))
+	mac.Write([]byte(r.unsigned(asset, extension, expires, kid)))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -241,14 +242,20 @@ func (r *videoReferenceRuntime) saveImage(ctx context.Context, key *APIKey, imag
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	ref := &VideoReference{SchemaVersion: 1, AssetID: asset, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), RelativePath: filepath.ToSlash(filepath.Join(now.Format("2006/01/02"), asset, "input.png")), MimeType: "image/png", ByteLength: image.size, SHA256: image.sha256, Width: image.width, Height: image.height, CreatedAt: now.Unix(), ExpiresAt: now.Unix() + 604800, SigningKeyID: r.cfg.SigningKeyID}
-	ref.SignedURL = r.unsigned(asset, ref.ExpiresAt, ref.SigningKeyID) + "&signature=" + r.sign(asset, ref.ExpiresAt, ref.SigningKeyID)
+	if image.extension == "" || image.mimeType == "" {
+		if err := image.validate(1); err != nil {
+			return nil, err
+		}
+	}
+	filename := "input" + image.extension
+	ref := &VideoReference{SchemaVersion: 1, AssetID: asset, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), RelativePath: filepath.ToSlash(filepath.Join(now.Format("2006/01/02"), asset, filename)), MimeType: image.mimeType, ByteLength: image.size, SHA256: image.sha256, Width: image.width, Height: image.height, CreatedAt: now.Unix(), ExpiresAt: now.Unix() + 604800, SigningKeyID: r.cfg.SigningKeyID}
+	ref.SignedURL = r.unsigned(asset, image.extension, ref.ExpiresAt, ref.SigningKeyID) + "&signature=" + r.sign(asset, image.extension, ref.ExpiresAt, ref.SigningKeyID)
 	input, err := image.open()
 	if err != nil {
 		return nil, fmt.Errorf("open reference image: %w", err)
 	}
 	defer input.Close()
-	output, err := os.OpenFile(filepath.Join(staging, "input.png"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	output, err := os.OpenFile(filepath.Join(staging, filename), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("create reference image: %w", err)
 	}
@@ -266,7 +273,7 @@ func (r *videoReferenceRuntime) saveImage(ctx context.Context, key *APIKey, imag
 	if written != image.size {
 		return nil, fmt.Errorf("reference image byte length changed: expected=%d actual=%d", image.size, written)
 	}
-	manifest, _ := json.Marshal(videoReferenceManifest{1, asset, ref.CreatedAt, ref.ExpiresAt, ref.SHA256, ref.ByteLength})
+	manifest, _ := json.Marshal(videoReferenceManifest{SchemaVersion: 1, AssetID: asset, ImageExtension: image.extension, CreatedAt: ref.CreatedAt, ExpiresAt: ref.ExpiresAt, SHA256: ref.SHA256, ByteLength: ref.ByteLength})
 	if err = writeVideoFile(filepath.Join(staging, "manifest.json"), manifest); err != nil {
 		return nil, err
 	}
@@ -318,9 +325,11 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 		http.Error(w, "video reference service unavailable", 503)
 		return
 	}
-	asset := strings.TrimSuffix(filename, ".png")
+	extension := filepath.Ext(filename)
+	asset := strings.TrimSuffix(filename, extension)
+	mimeType, validExtension := videoImageMimeType(extension)
 	query, parseErr := url.ParseQuery(req.URL.RawQuery)
-	valid := parseErr == nil && strings.HasSuffix(filename, ".png") && videoAssetPattern.MatchString(asset) && len(query) == 3
+	valid := parseErr == nil && validExtension && videoAssetPattern.MatchString(asset) && len(query) == 3
 	for _, name := range []string{"expires", "kid", "signature"} {
 		valid = valid && len(query[name]) == 1
 	}
@@ -334,7 +343,7 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 		http.Error(w, "invalid signature", 403)
 		return
 	}
-	expected, _ := hex.DecodeString(r.sign(asset, expires, kid))
+	expected, _ := hex.DecodeString(r.sign(asset, extension, expires, kid))
 	if !hmac.Equal(expected, sig) {
 		r.signatureFailures.Add(1)
 		slog.Warn("video_reference.signature_rejected")
@@ -359,7 +368,7 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 		readError(503, "reference storage unavailable")
 		return
 	}
-	if ref.AssetID != asset || ref.ExpiresAt != expires || ref.SigningKeyID != kid || ref.SchemaVersion != 1 || ref.MimeType != "image/png" || ref.ByteLength < 1 || ref.ByteLength > videoPNGMaxBytes {
+	if ref.AssetID != asset || ref.ExpiresAt != expires || ref.SigningKeyID != kid || ref.SchemaVersion != 1 || ref.MimeType != mimeType || ref.ByteLength < 1 || ref.ByteLength > videoReferenceImageMaxBytes {
 		readError(403, "invalid reference")
 		return
 	}
@@ -377,7 +386,8 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 	}
 	defer root.Close()
 	relative := filepath.FromSlash(ref.RelativePath)
-	expectedPath := filepath.Join(time.Unix(ref.CreatedAt, 0).UTC().Format("2006/01/02"), asset, "input.png")
+	imageFilename := "input" + extension
+	expectedPath := filepath.Join(time.Unix(ref.CreatedAt, 0).UTC().Format("2006/01/02"), asset, imageFilename)
 	if relative != expectedPath {
 		readError(403, "invalid reference")
 		return
@@ -412,14 +422,33 @@ func (s *OpenAIGatewayService) ServeVideoReference(w http.ResponseWriter, req *h
 		readError(503, "reference file invalid")
 		return
 	}
-	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	var reader io.ReadSeeker = f
 	if r.cfg.ReferenceBytesPerSecond > 0 {
 		reader = &videoThrottledFile{ReadSeeker: f, ctx: req.Context(), rate: r.cfg.ReferenceBytesPerSecond, start: time.Now()}
 	}
-	http.ServeContent(w, req, "input.png", time.Unix(ref.CreatedAt, 0), reader)
+	http.ServeContent(w, req, imageFilename, time.Unix(ref.CreatedAt, 0), reader)
+}
+
+func videoImageMimeType(extension string) (string, bool) {
+	switch extension {
+	case ".png":
+		return "image/png", true
+	case ".jpg":
+		return "image/jpeg", true
+	case ".gif":
+		return "image/gif", true
+	case ".webp":
+		return "image/webp", true
+	case ".bmp":
+		return "image/bmp", true
+	case ".tiff":
+		return "image/tiff", true
+	default:
+		return "", false
+	}
 }
 
 type videoThrottledFile struct {
@@ -511,7 +540,16 @@ func (r *videoReferenceRuntime) cleanup(ctx context.Context) {
 		}
 		dir := filepath.Dir(path)
 		expiredBacklog++
-		imagePath := filepath.Join(dir, "input.png")
+		extension := m.ImageExtension
+		if extension == "" {
+			extension = ".png"
+		}
+		if _, ok := videoImageMimeType(extension); !ok {
+			r.cleanupFailures.Add(1)
+			slog.Warn("video_reference.invalid_manifest")
+			return nil
+		}
+		imagePath := filepath.Join(dir, "input"+extension)
 		imageInfo, _ := os.Lstat(imagePath)
 		if e = os.Remove(imagePath); e != nil && !os.IsNotExist(e) {
 			r.cleanupFailures.Add(1)

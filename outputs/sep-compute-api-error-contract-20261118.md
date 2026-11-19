@@ -22,7 +22,7 @@
 | A08 | `POST /v1/images/edits` | 图生图，多张参考图 | multipart：重复 `image[]` 文件字段，加 `model/prompt/n/size/quality/response_format` | 与 A07 类似；不能仅根据 2xx 判定图片生成成功。 |
 | A09 | `POST /v1/sub2api/videos/pricing` | 文生视频、图生视频报价 | JSON：`model/operation/resolution/duration_seconds` | 200 报价；除图片同类检查外，兼容可选 `diagnostic`。 |
 | A10 | `GET /v1/sub2api/videos/usage?request_id=...` | 单次视频生成账务核对 | URL 编码的账务关联 ID | 200 `pending/settled`，核对模型、数量、分辨率、时长、金额。 |
-| A11 | `POST /v1/videos` | 文生视频、图生视频创建 | 文生 JSON；图生 multipart，重复 `input_reference` PNG 文件字段；附报价和关联请求头 | 旧协议成功受理为 202 视频对象；原生协议响应取决于上游。受理成功仍须检查任务状态，不能当成已生成。 |
+| A11 | `POST /v1/videos` | 文生视频、图生视频创建 | 文生 JSON；图生 multipart，重复 `input_reference` 图片文件字段；附报价和关联请求头 | 旧协议成功受理为 202 视频对象；原生协议响应取决于上游。受理成功仍须检查任务状态，不能当成已生成。 |
 | A12 | `GET /v1/videos/{task_id}` | 查询已提交视频任务 | 路径中的任务 ID；使用创建时的同一 Key | 旧协议通常 200，`status=failed` 时仍为 200，真实原因在 `error`。 |
 | A13 | `GET /v1/videos/{task_id}/content` | 下载视频成品 | 原任务 ID、原 Key | SEP 当前要求完整 200 视频字节；非 2xx 先按错误解析，已开始下载后的断流不能期待 JSON。 |
 
@@ -250,7 +250,7 @@ X-Video-Operation: text-to-video
 }
 ```
 
-图生视频改为 multipart，重复 `input_reference` 上传 PNG，其他参数为表单字符串，operation 为 image-to-video。当前 SEP V3 适配器已经不转发 fps；脑生云旧协议忽略未列入适配字段的参数，保留字段类型错误、output_format 不支持等仍会被拒绝，不等于无条件忽略所有无效参数。
+图生视频改为 multipart，重复 `input_reference` 上传图片，其他参数为表单字符串，operation 为 image-to-video。参考图支持 PNG、JPEG、WebP、GIF、BMP 和 TIFF；后端按图片内容识别格式并保留原格式供上游读取，不依赖文件名后缀或上传的 Content-Type。单张最多 10 MiB，宽高各最多 4096、像素总数最多 16,777,216；每请求最多 9 张，图片总量最多 90 MiB。当前 SEP V3 适配器已经不转发 fps；脑生云旧协议忽略未列入适配字段的参数，保留字段类型错误、output_format 不支持等仍会被拒绝，不等于无条件忽略所有无效参数。
 
 | HTTP | `error.code/type` 或 `platform_code` | 含义与处理 |
 |---|---|---|
@@ -270,7 +270,7 @@ X-Video-Operation: text-to-video
 | 429 | `rate_limit_error` 或供应商错误码 | 上传/执行并发、上游限流或配额问题，按 message 区分。 |
 | 502/504 等 | `video_upstream_error/video_upstream_timeout/video_protocol_error`，或供应商 code + platform_code | 上游拒绝、网络超时、回执协议/身份不符等；可能已经发出请求，先按提交不确定处理。 |
 
-旧协议生成约束：seedance-2.0、seedance-2.0-fast、seedance-2.0-mini 为 4..15 秒，seedance-2.5 为 4..30 秒；图生视频参考图 1..9 张、每张最多 10,485,760 字节，总计最多 94,371,840 字节，完整 multipart 最多 96,468,992 字节，非文件字段合计最多 2,097,152 字节；PNG 宽高各 1..4096，像素总数最多 16,777,216。原生协议另有约束，不能套用旧协议的 9 张规则。
+旧协议生成约束：seedance-2.0、seedance-2.0-fast、seedance-2.0-mini 为 4..15 秒，seedance-2.5 为 4..30 秒；图生视频参考图 1..9 张、每张最多 10,485,760 字节，总计最多 94,371,840 字节，完整 multipart 最多 96,468,992 字节，非文件字段合计最多 2,097,152 字节；支持的图片格式为 PNG、JPEG、WebP、GIF、BMP、TIFF，宽高各 1..4096，像素总数最多 16,777,216。原生协议另有约束，不能套用旧协议的 9 张规则。
 
 当前报价预派发拒绝示例：
 
