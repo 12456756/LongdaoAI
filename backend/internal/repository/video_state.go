@@ -86,7 +86,11 @@ func (c *gatewayCache) VideoSaveReference(ctx context.Context, r *service.VideoR
 	_, err = c.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 		key := "video:reference:" + r.AssetID
 		p.HSet(ctx, key, values)
-		p.ExpireAt(ctx, key, time.Unix(r.ExpiresAt, 0))
+		expires := r.ExpiresAt
+		if r.ReadUntil > 0 {
+			expires = r.ReadUntil + 86400
+		}
+		p.ExpireAt(ctx, key, time.Unix(expires, 0))
 		return nil
 	})
 	return err

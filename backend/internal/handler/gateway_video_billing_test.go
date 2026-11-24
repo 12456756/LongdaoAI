@@ -24,7 +24,11 @@ func newVideoPricingHandlerForTest(channel *service.Channel) (*GatewayHandler, *
 	h, key := newImagePricingHandlerForTest(channel)
 	h.gatewayService = newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{
 		*key.GroupID: {{ID: 1, Platform: service.PlatformOpenAI, Credentials: map[string]any{
-			"model_mapping": map[string]any{"minimax-h3": "minimax-h3"},
+			"model_mapping": map[string]any{
+				"minimax-h3":        "minimax-h3",
+				"seedance-2.0-fast": "seedance-2.0-fast",
+				"seedance-2.5":      "seedance-2.5",
+			},
 		}}},
 	}}).gatewayService
 	key.Group.VideoRateIndependent, key.Group.VideoRateMultiplier = true, 0.5
@@ -109,10 +113,10 @@ func TestVideoPricingHTTPStrictInput(t *testing.T) {
 		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":4.5`, 1),
 		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":"4"`, 1),
 		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":0`, 1),
-		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":-1`, 1),
+		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":-2`, 1),
 		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":2147483648`, 1),
 		strings.Replace(validVideoPricingJSON, `"duration_seconds":4`, `"duration_seconds":601`, 1),
-		strings.Replace(validVideoPricingJSON, "720p", "2k", 1), strings.Replace(validVideoPricingJSON, "720p", "768p", 1),
+		strings.Replace(validVideoPricingJSON, "720p", "8k", 1), strings.Replace(validVideoPricingJSON, "720p", "768p", 1),
 		strings.Replace(validVideoPricingJSON, "720p", "hd", 1), strings.Replace(validVideoPricingJSON, "image-to-video", "edit", 1),
 		strings.Replace(validVideoPricingJSON, "minimax-h3", "minimax h3", 1), strings.Replace(validVideoPricingJSON, "minimax-h3", `minimax\u0000h3`, 1),
 		strings.Replace(validVideoPricingJSON, "minimax-h3", strings.Repeat("x", 4096), 1),
@@ -130,6 +134,40 @@ func TestVideoPricingHTTPStrictInput(t *testing.T) {
 	}
 	recorder := videoBillingHTTP(t, h, key, http.MethodPost, "/v1/sub2api/videos/pricing", strings.Replace(validVideoPricingJSON, "image-to-video", "text-to-video", 1))
 	require.Equal(t, 200, recorder.Code)
+}
+
+func TestVideoToVideoPricingHTTP(t *testing.T) {
+	h, key := newVideoPricingHandlerForTest(nil)
+	key.Group.VideoPrice720P = videoContractPtr(0.1)
+	request := `{"model":"seedance-2.0-fast","operation":"video-to-video","resolution":"720p","duration_seconds":5}`
+	recorder := videoBillingHTTP(t, h, key, http.MethodPost, "/v1/sub2api/videos/pricing", request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"operation":"video-to-video"`)
+	require.Contains(t, recorder.Body.String(), `"pricing_status":"quoted"`)
+
+	for _, seconds := range []string{"3", "16"} {
+		invalid := strings.Replace(request, `"duration_seconds":5`, `"duration_seconds":`+seconds, 1)
+		recorder = videoBillingHTTP(t, h, key, http.MethodPost, "/v1/sub2api/videos/pricing", invalid)
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+
+	auto := strings.Replace(request, `"duration_seconds":5`, `"duration_seconds":-1`, 1)
+	recorder = videoBillingHTTP(t, h, key, http.MethodPost, "/v1/sub2api/videos/pricing", auto)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"pricing_status":"unavailable"`)
+
+	channel := &service.Channel{ModelPricing: []service.ChannelModelPricing{{
+		Models: []string{"minimax-h3"}, BillingMode: service.BillingModePerRequest, PerRequestPrice: videoContractPtr(0.4),
+	}}}
+	h, key = newVideoPricingHandlerForTest(channel)
+	key.Group.VideoPrice720P = videoContractPtr(0.1)
+	auto = strings.Replace(auto, "seedance-2.0-fast", "minimax-h3", 1)
+	for _, resolution := range []string{"720p", "2k", "4k"} {
+		recorder = videoBillingHTTP(t, h, key, http.MethodPost, "/v1/sub2api/videos/pricing", strings.Replace(auto, "720p", resolution, 1))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Contains(t, recorder.Body.String(), `"billing_mode":"per_request"`)
+		require.Contains(t, recorder.Body.String(), `"amount_usd":"0.2000000000"`)
+	}
 }
 
 func TestVideoPricingVersionStableAndBindsInputAndPrice(t *testing.T) {
@@ -281,12 +319,17 @@ func TestVideoUsageHTTPSettlesOnlyReliableVideoEvidence(t *testing.T) {
 			e.DurationSeconds = videoContractPtr(0)
 			return e
 		}, want: "pending"},
+		{name: "confirmed automatic duration", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
+			e.DurationSeconds = videoContractPtr(service.VideoAutoDuration)
+			e.Resolution = videoContractPtr("2k")
+			return e
+		}, want: "settled"},
 		{name: "missing resolution", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.Resolution = nil
 			return e
 		}, want: "pending"},
 		{name: "unsupported resolution", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
-			e.Resolution = videoContractPtr("2k")
+			e.Resolution = videoContractPtr("8k")
 			return e
 		}, want: "pending"},
 	} {

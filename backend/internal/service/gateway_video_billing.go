@@ -27,6 +27,8 @@ type VideoBillingQuote struct {
 
 var ErrVideoPricingChanged = errors.New("video pricing changed; obtain a new quote")
 
+func (q *VideoBillingQuote) MappedModel() string { return q.mapping.MappedModel }
+
 // FrozenVideoBilling is created only by server-side pre-dispatch verification.
 // Its private value copy survives administrator changes during upstream I/O.
 type FrozenVideoBilling struct {
@@ -67,10 +69,13 @@ func (q *VideoBillingQuote) Version(key *APIKey, model, operation, resolution st
 }
 
 func (r *OpenAIVideoRequest) VideoBillingOperation() string {
-	if len(r.moderation.Uploads) > 0 || len(r.moderation.InputImageURLs) > 0 {
-		return "image-to-video"
+	if r.referenceOperation != "" {
+		return r.referenceOperation
 	}
-	return "text-to-video"
+	if len(r.moderation.Uploads) > 0 || len(r.moderation.InputImageURLs) > 0 {
+		return VideoOperationImage
+	}
+	return VideoOperationText
 }
 
 func (s *OpenAIGatewayService) PrepareVideoBilling(ctx context.Context, key *APIKey, request *OpenAIVideoRequest, operation, version string) (*FrozenVideoBilling, error) {
@@ -94,7 +99,7 @@ func (s *OpenAIGatewayService) PrepareVideoBilling(ctx context.Context, key *API
 	if err != nil {
 		return nil, fmt.Errorf("Compute video pricing version: %w", err)
 	}
-	if current != version {
+	if version != "" && current != version {
 		return nil, fmt.Errorf("Video pricing version no longer matches the current quote: %w", ErrVideoPricingChanged)
 	}
 	return &FrozenVideoBilling{keyID: key.ID, userID: key.UserID, groupID: *key.GroupID,
@@ -113,15 +118,19 @@ func (f *FrozenVideoBilling) recordCost(input *OpenAIRecordUsageInput) (*CostBre
 
 func ValidVideoBillingResolution(resolution string) bool {
 	switch resolution {
-	case VideoBillingResolution480P, VideoBillingResolution720P, VideoBillingResolution1080P:
+	case VideoBillingResolution480P, VideoBillingResolution720P, VideoBillingResolution1080P, VideoBillingResolution2K, VideoBillingResolution4K:
 		return true
 	}
 	return false
 }
 
+func ValidVideoPricingDuration(seconds int) bool {
+	return seconds == VideoAutoDuration || (seconds > 0 && seconds <= 600)
+}
+
 func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKey, model, resolution string, durationSeconds int, _ time.Time) (*VideoBillingQuote, error) {
 	if s == nil || s.billingService == nil || key == nil || key.GroupID == nil || key.Group == nil ||
-		key.ID <= 0 || key.UserID <= 0 || *key.GroupID != key.Group.ID || !ValidVideoBillingResolution(resolution) || durationSeconds <= 0 || durationSeconds > 600 {
+		key.ID <= 0 || key.UserID <= 0 || *key.GroupID != key.Group.ID || !ValidVideoBillingResolution(resolution) || !ValidVideoPricingDuration(durationSeconds) {
 		return nil, errors.New("video billing is unavailable")
 	}
 	// Quotes and dispatch checks read current configuration, not auth/rate caches.
@@ -182,7 +191,7 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 			billingModel = mapping.MappedModel
 		}
 	}
-	if normalizeVideoUsageDurationSeconds(billingModel, durationSeconds) != durationSeconds {
+	if durationSeconds != VideoAutoDuration && normalizeVideoUsageDurationSeconds(billingModel, durationSeconds) != durationSeconds {
 		quote.Source = "duration_unresolved"
 		return quote, nil
 	}
@@ -195,6 +204,10 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 		VideoCount: 1, VideoResolution: resolution, VideoDurationSeconds: durationSeconds,
 	}, quote.Multiplier)
 	quote.Source = source
+	if durationSeconds == VideoAutoDuration && source != PricingSourceChannel {
+		quote.Diagnostic = "Automatic duration requires a configured per-request channel price"
+		return quote, nil
+	}
 	if source == PricingSourceChannel {
 		quote.Mode = BillingModePerRequest
 	}
@@ -218,12 +231,11 @@ func (s *OpenAIGatewayService) videoCostDecision(ctx context.Context, billingMod
 	resolution := NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
 	durationSeconds := normalizeVideoUsageDurationSeconds(billingModel, result.VideoDurationSeconds)
 	groupConfig := videoPriceConfigFromAPIKey(apiKey)
-	if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
-		return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier), "group", validImageBillingAmount(*apiKey.Group.GetVideoPrice(resolution))
-	}
-	if refreshed := s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey); refreshed != apiKey {
-		apiKey = refreshed
-		groupConfig = videoPriceConfigFromAPIKey(apiKey)
+	if result.VideoDurationSeconds != VideoAutoDuration {
+		if !apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+			apiKey = s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey)
+			groupConfig = videoPriceConfigFromAPIKey(apiKey)
+		}
 		if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
 			return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier), "group", validImageBillingAmount(*apiKey.Group.GetVideoPrice(resolution))
 		}

@@ -49,6 +49,62 @@ curl "$RELAY_BASE_URL/v1/videos/$VIDEO_TASK_ID/content" \
 
 任务响应、状态及错误正文保持上游格式；内容接口支持 `variant` 查询参数、Range 请求和流式下载。
 
+## Seedance 参考视频
+
+账号的视频协议选择「脑生云（旧版视频任务）」。SEP 继续调用 `POST /v1/videos`，以 JSON 提交参考素材，Longdao 将 `metadata.content` 转为脑生云「豆包 视频生成」`POST /v1/video/tasks` 的 `params.content`。
+
+```json
+{
+  "model": "seedance-2.0-fast",
+  "prompt": "保留参考视频的运镜，把场景改为夜间街道",
+  "seconds": 5,
+  "resolution": "720p",
+  "aspect_ratio": "16:9",
+  "metadata": {
+    "content": [
+      {
+        "type": "video_url",
+        "video_url": {"url": "https://media.example.com/reference.mp4"},
+        "role": "reference_video"
+      }
+    ]
+  }
+}
+```
+
+- 可混用 `reference_image`、`reference_video`、`reference_audio`，对应的素材类型为 `image_url`、`video_url`、`audio_url`。地址支持公共 HTTP(S) 或当前上游组织可访问的 `asset://素材ID`。至少提供一张参考图或一个参考视频。提示词可省略，也可作为一条 `type: "text"` 放在数组中，与顶层 `prompt` 二选一。
+- Seedance 2.0 系列支持最多 9 张图、3 个视频、3 个音频，固定时长 4–15 秒。Seedance 2.5 支持最多 30 张图、10 个视频、10 个音频，固定时长 4–30 秒。两档默认 5 秒、720p。
+- 先向 `POST /v1/sub2api/videos/pricing` 提交 `model`、`operation`、`resolution`、`duration_seconds`。只要包含参考视频，`operation` 就填 `video-to-video`；提交生成时将该值和返回的报价版本分别放入 `X-Video-Operation` 和 `X-Video-Pricing-Version`。查询、下载和账务接口沿用原路径。
+- `seconds: -1` 交由上游选择时长。由于上游任务响应不报告实际秒数，自动时长需配置按次渠道价，账务查询的 `duration_seconds` 为 `null`。分组视频单价支持 480p、720p、1080p；2k、4k 可通过渠道模型定价。
+
+### 上传参考视频文件
+
+SEP 使用同一把 Longdao API Key 调用 `POST /v1/videos/references`，以 `multipart/form-data` 的 `file` 字段上传一个 MP4 或 MOV 文件。单文件最多 90 MiB，整个请求最多 92 MiB。上传成功返回 HTTP 201，例如：
+
+```json
+{
+  "reference_id": "vref_0123456789abcdef0123456789abcdef",
+  "content_type": "video/mp4",
+  "size_bytes": 5242880,
+  "expires_at": "2026-12-01T03:00:00Z"
+}
+```
+
+生成请求的 `metadata.content` 使用 `{"type":"video_url","video_url":{"reference_id":"vref_0123456789abcdef0123456789abcdef"},"role":"reference_video"}`。每条 `video_url` 的 `reference_id` 和 `url` 二选一。上传 ID 从上传日起 7 天内可用于新任务，给已派发任务签发的地址继续覆盖现有 7 天任务窗口。部署复用 `video_legacy` 的共享文件目录、容量和签名配置。
+
+错误使用 `{"error":{"type":"...","code":"...","message":"...","source":"platform"}}`。鉴权错误沿用网关格式。SEP 可以记录 `X-Client-Request-ID` 关联问题。
+
+| HTTP | `error.code` | 原因 |
+| --- | --- | --- |
+| 400 | `invalid_video_reference_upload` | 上传格式错误、缺少文件、空文件或有多个字段 |
+| 413 | `video_reference_too_large` | 文件或请求超过限制 |
+| 415 | `unsupported_video_reference_format` | 视频容器无效或缺少视频轨 |
+| 429 | `rate_limit_error` | 达到上传并发上限 |
+| 503 | `video_reference_storage_error` | 参考视频存储暂不可用 |
+| 400 | `invalid_video_reference` | 创建任务时 URL 和素材 ID 未按约定二选一 |
+| 404 | `video_reference_not_found` | 素材不存在或不属于调用方 |
+| 410 | `video_reference_expired` | 素材已过期，需要重新上传 |
+
 ## 任务归属与计费
 
 任务 ID 与提交账户的绑定保存在共享 Redis 中，按中转 API Key ID 和分组隔离，保留 7 天。

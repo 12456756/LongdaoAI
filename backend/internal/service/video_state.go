@@ -44,6 +44,7 @@ type VideoTaskMetadata struct {
 }
 
 type VideoReference struct {
+	ReadUntil     int64  `json:"read_until,omitempty"`
 	SchemaVersion int    `json:"schema_version"`
 	AssetID       string `json:"asset_id"`
 	APIKeyID      int64  `json:"api_key_id"`

@@ -132,7 +132,24 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(started).Milliseconds())
 	var selection *service.AccountSelectionResult
 	if create {
-		selection, _, err = h.gatewayService.SelectAccountWithSchedulerForCapability(ctx, apiKey.GroupID, "", "", requestModel, nil, service.OpenAIUpstreamTransportHTTPSSE, service.OpenAIEndpointCapabilityVideos, false, false, false)
+		var excluded map[int64]struct{}
+		if request.UsesUploadedVideoReference() {
+			excluded = make(map[int64]struct{})
+		}
+		for {
+			selection, _, err = h.gatewayService.SelectAccountWithSchedulerForCapability(ctx, apiKey.GroupID, "", "", requestModel, excluded, service.OpenAIUpstreamTransportHTTPSSE, service.OpenAIEndpointCapabilityVideos, false, false, false)
+			if err != nil || selection == nil || selection.Account == nil || excluded == nil || selection.Account.VideoProtocol() == service.VideoProtocolLegacy {
+				break
+			}
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			if _, seen := excluded[selection.Account.ID]; seen {
+				selection = nil
+				break
+			}
+			excluded[selection.Account.ID] = struct{}{}
+		}
 	} else {
 		var account *service.Account
 		account, err = h.gatewayService.GetVideoTaskAccount(ctx, apiKey, taskID)
@@ -173,6 +190,10 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 		}
 		if err != nil {
 			status, code, message := service.VideoRequestErrorDetails(err)
+			if code == "invalid_video_reference" {
+				writeVideoReferenceError(c, status, code, message)
+				return
+			}
 			h.errorResponse(c, status, code, message)
 			return
 		}

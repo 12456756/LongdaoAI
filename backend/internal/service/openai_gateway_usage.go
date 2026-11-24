@@ -285,6 +285,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.VideoCount = result.VideoCount
 		usageLog.VideoResolution = optionalTrimmedStringPtr(NormalizeVideoBillingResolutionOrDefault(result.VideoResolution))
 		videoDurationSeconds := normalizeVideoUsageDurationSeconds(billingModel, result.VideoDurationSeconds)
+		if result.VideoDurationSeconds == VideoAutoDuration {
+			videoDurationSeconds = VideoAutoDuration
+		}
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
 	}
 	if cost != nil {

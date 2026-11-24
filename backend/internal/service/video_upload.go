@@ -122,21 +122,37 @@ func (r *OpenAIVideoRequest) ValidateVideoReferences(protocol, operation string)
 	if r.otherFiles != 0 || len(r.moderation.InputImageURLs) != 0 {
 		return videoError(422, "unsupported_parameter", "Only input_reference image uploads are supported")
 	}
+	if len(r.referenceContent) > 0 {
+		items, err := parseVideoReferenceContent(r.referenceContent, r.Prompt, operation)
+		if err != nil {
+			return err
+		}
+		r.legacyReferences = items
+		r.referenceOperation = VideoOperationImage
+		for _, item := range items {
+			if item.Type == "video_url" {
+				r.referenceOperation = VideoOperationVideo
+				break
+			}
+		}
+		r.legacyValidated = true
+		return nil
+	}
 	count := len(r.moderation.Uploads)
 	if r.bodyPath != "" {
 		count = r.spooledReferenceCount
 	}
 	switch operation {
-	case "text-to-video":
+	case VideoOperationText:
 		if count != 0 {
 			return videoError(400, "invalid_request_error", fmt.Sprintf("Text-to-video requires 0 reference images; received %d", count))
 		}
-	case "image-to-video":
+	case VideoOperationImage:
 		if count < 1 || count > videoReferenceMaxCount {
 			return videoError(400, "invalid_request_error", fmt.Sprintf("input_reference count %d; allowed 1..%d", count, videoReferenceMaxCount))
 		}
 	default:
-		return videoError(400, "invalid_request_error", "X-Video-Operation must be text-to-video or image-to-video")
+		return videoError(400, "invalid_request_error", "X-Video-Operation must be text-to-video or image-to-video without metadata.content")
 	}
 	var images []videoReferenceInput
 	var total int64
@@ -294,6 +310,26 @@ func (r *OpenAIVideoRequest) PayloadHash() string {
 // VisitModerationBodies keeps at most one uploaded image's base64 in each check.
 // This also avoids the shared moderation policy sampling one image from a batch.
 func (r *OpenAIVideoRequest) VisitModerationBodies(visit func([]byte) bool) error {
+	if len(r.legacyReferences) > 0 {
+		info := r.moderation
+		for _, item := range r.legacyReferences {
+			if item.Type == "text" {
+				info.Prompt = item.Text
+			}
+		}
+		if !visit(info.ModerationBody()) {
+			return nil
+		}
+		for _, item := range r.legacyReferences {
+			if item.ImageURL != nil && !strings.HasPrefix(strings.ToLower(item.ImageURL.URL), "asset://") {
+				info.InputImageURLs = []string{item.ImageURL.URL}
+				if !visit(info.ModerationBody()) {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
 	if !r.Multipart {
 		visit(r.ModerationBody())
 		return nil

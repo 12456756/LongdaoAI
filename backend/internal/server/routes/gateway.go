@@ -216,6 +216,7 @@ func RegisterGatewayRoutes(
 		gateway.DELETE("/images/batches/:id/outputs", h.BatchImage.DeleteOutputs)
 		gateway.POST("/videos/generations", videoGenerationHandler)
 		gateway.POST("/videos", h.OpenAIGateway.Videos)
+		gateway.POST("/videos/references", h.OpenAIGateway.UploadVideoReference)
 		gateway.POST("/video/generations", h.OpenAIGateway.Videos)
 		gateway.GET("/videos/:request_id/content", h.OpenAIGateway.Videos)
 		gateway.POST("/videos/edits", videoEditHandler)

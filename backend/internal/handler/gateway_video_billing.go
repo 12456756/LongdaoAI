@@ -62,8 +62,9 @@ func (h *GatewayHandler) videoBillingKey(c *gin.Context) *service.APIKey {
 }
 
 func validVideoPricingRequest(request videoPricingRequest) bool {
-	return validVideoBillingModel(request.Model) && (request.Operation == "image-to-video" || request.Operation == "text-to-video") &&
-		service.ValidVideoBillingResolution(request.Resolution) && request.DurationSeconds > 0 && request.DurationSeconds <= 600
+	return validVideoBillingModel(request.Model) && service.ValidVideoOperation(request.Operation) &&
+		service.ValidVideoBillingResolution(request.Resolution) && service.ValidVideoPricingDuration(request.DurationSeconds) &&
+		(request.DurationSeconds != service.VideoAutoDuration || request.Operation != service.VideoOperationText)
 }
 
 func validVideoBillingModel(model string) bool {
@@ -85,7 +86,7 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 		return
 	}
 	if !validVideoPricingRequest(request) {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Expected model (1-160 characters, no whitespace/control characters), operation (text-to-video/image-to-video), resolution (480p/720p/1080p), duration_seconds (1-600)")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Expected model (1-160 characters, no whitespace/control characters), operation (text-to-video/image-to-video/video-to-video), resolution (480p/720p/1080p/2k/4k), duration_seconds (1-600, or -1 for a reference request)")
 		return
 	}
 	var extra any
@@ -109,6 +110,10 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 	quote, err := h.openAIGatewayService.QuoteVideoBilling(c.Request.Context(), key, request.Model, request.Resolution, request.DurationSeconds, now)
 	if err != nil || quote == nil || math.IsNaN(quote.Multiplier) || math.IsInf(quote.Multiplier, 0) || quote.Multiplier < 0 {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read or version video quote", err, "Quote is missing or its multiplier is invalid"))
+		return
+	}
+	if request.Operation == service.VideoOperationVideo && !service.ValidSeedanceReferenceDuration(quote.MappedModel(), request.DurationSeconds) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Seedance 2.0 reference-video duration must be -1 or 4 to 15 seconds")
 		return
 	}
 	response := videoPricingResponse{
@@ -150,13 +155,21 @@ var videoPricingVersion = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
 // Legacy callers remain compatible. SEP opts into price protection with both
 // headers; only this local, pre-dispatch path may emit the rejection marker.
 func (h *OpenAIGatewayHandler) prepareVideoBilling(c *gin.Context, key *service.APIKey, account *service.Account, request *service.OpenAIVideoRequest) (*service.FrozenVideoBilling, bool) {
-	message, code := "Expected exactly one valid X-Video-Pricing-Version and X-Video-Operation (text-to-video or image-to-video) header", "invalid_video_pricing_headers"
+	message, code := "Expected exactly one valid X-Video-Pricing-Version and X-Video-Operation (text-to-video, image-to-video or video-to-video) header", "invalid_video_pricing_headers"
 	versions, operations := c.Request.Header.Values("X-Video-Pricing-Version"), c.Request.Header.Values("X-Video-Operation")
 	if len(versions) == 0 && len(operations) == 0 {
+		if request.Seconds == service.VideoAutoDuration {
+			frozen, err := h.gatewayService.PrepareVideoBilling(c.Request.Context(), key, request, request.VideoBillingOperation(), "")
+			if err != nil || !frozen.MatchesAccount(account) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "video_pricing_not_configured", localDiagnosticMessage("Verify automatic-duration video price", err, "Selected account does not match the configured pricing"))
+				return nil, false
+			}
+			return frozen, true
+		}
 		return nil, true
 	}
 	if len(versions) == 1 && len(operations) == 1 && videoPricingVersion.MatchString(versions[0]) &&
-		(operations[0] == "text-to-video" || operations[0] == "image-to-video") {
+		service.ValidVideoOperation(operations[0]) {
 		frozen, err := h.gatewayService.PrepareVideoBilling(c.Request.Context(), key, request, operations[0], versions[0])
 		if err == nil && frozen.MatchesAccount(account) {
 			return frozen, true
@@ -223,8 +236,8 @@ func (h *GatewayHandler) RequestVideoUsage(c *gin.Context) {
 func reliableVideoBillingEvidence(evidence *service.VideoRequestBillingEvidence) bool {
 	if evidence == nil || !evidence.TransactionConfirmed || evidence.BillingMode != string(service.BillingModeVideo) ||
 		evidence.Model == nil || !validVideoBillingModel(*evidence.Model) || evidence.ActualCostUSD == nil ||
-		evidence.VideoCount == nil || *evidence.VideoCount <= 0 || evidence.DurationSeconds == nil || *evidence.DurationSeconds <= 0 ||
-		*evidence.DurationSeconds > 600 ||
+		evidence.VideoCount == nil || *evidence.VideoCount <= 0 || evidence.DurationSeconds == nil ||
+		!service.ValidVideoPricingDuration(*evidence.DurationSeconds) ||
 		evidence.Resolution == nil || !service.ValidVideoBillingResolution(*evidence.Resolution) {
 		return false
 	}

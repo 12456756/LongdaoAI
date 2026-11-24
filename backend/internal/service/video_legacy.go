@@ -194,15 +194,18 @@ func legacyFields(request *OpenAIVideoRequest) (map[string]string, error) {
 			if err = decoder.Decode(&raw); err != nil {
 				return nil, err
 			}
-			if !allowed[name] {
+			if name == "metadata" && len(request.referenceContent) > 0 {
+				continue
+			}
+			if !allowed[name] && !(name == "duration" && len(request.referenceContent) > 0) {
 				ignored = append(ignored, name)
 				continue
 			}
 			switch name {
-			case "seconds":
+			case "seconds", "duration":
 				var v json.Number
 				if json.Unmarshal(raw, &v) != nil || len(raw) == 0 || raw[0] == '"' {
-					return nil, videoError(400, "invalid_request_error", "seconds must be a JSON integer")
+					return nil, videoError(400, "invalid_request_error", name+" must be a JSON integer")
 				}
 				fields[name] = v.String()
 			case "generate_audio":
@@ -236,13 +239,35 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 	default:
 		return nil, nil, videoError(422, "unsupported_spec", "Unsupported legacy video model")
 	}
-	duration, err := strconv.Atoi(fields["seconds"])
-	maxDuration := 15
-	if model == "seedance-2.5" {
-		maxDuration = 30
+	if err := request.ValidateVideoReferences(VideoProtocolLegacy, operation); err != nil {
+		return nil, nil, err
 	}
-	if err != nil || duration < 4 || duration > maxDuration {
+	references := request.legacyReferences
+	rawDuration := fields["seconds"]
+	if len(references) > 0 {
+		rawDuration = firstNonEmptyString(rawDuration, fields["duration"], "5")
+	}
+	duration, err := strconv.Atoi(rawDuration)
+	if err != nil || !ValidSeedanceReferenceDuration(model, duration) || (len(references) == 0 && duration == VideoAutoDuration) {
 		return nil, nil, videoError(422, "unsupported_duration", "Unsupported legacy video duration")
+	}
+	if len(references) > 0 {
+		if err := validateVideoReferenceCounts(references, model); err != nil {
+			return nil, nil, err
+		}
+		if fields["resolution"] == "" && fields["size"] == "" {
+			fields["resolution"] = VideoBillingResolution720P
+		}
+		switch fields["resolution"] {
+		case "480p", "720p", "1080p", "2k", "4k":
+		default:
+			return nil, nil, videoError(422, "unsupported_spec", "Unsupported Seedance resolution")
+		}
+		switch fields["aspect_ratio"] {
+		case "", "adaptive", "1:1", "4:3", "3:4", "16:9", "9:16", "21:9":
+		default:
+			return nil, nil, videoError(422, "unsupported_spec", "Unsupported Seedance aspect ratio")
+		}
 	}
 	if strings.TrimSpace(fields["resolution"]) == "" {
 		return nil, nil, videoError(400, "invalid_request_error", "resolution is required")
@@ -273,6 +298,9 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 		}
 	}
 	params := map[string]any{"duration": duration, "resolution": fields["resolution"], "content": []map[string]any{{"type": "text", "text": request.Prompt}}}
+	if len(references) > 0 {
+		params["content"] = references
+	}
 	if ratio := fields["aspect_ratio"]; ratio != "" {
 		params["ratio"] = ratio
 	}
@@ -281,9 +309,6 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 			return nil, nil, videoError(400, "invalid_request_error", "generate_audio must be true or false")
 		}
 		params["generate_audio"] = audio == "true"
-	}
-	if err := request.ValidateVideoReferences(VideoProtocolLegacy, operation); err != nil {
-		return nil, nil, err
 	}
 	return params, request.legacyImages, nil
 }
@@ -433,15 +458,16 @@ func sanitizeLegacyErrorMessage(message string, request []byte, apiKey string) s
 	}
 	var input struct {
 		Params struct {
-			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
+			Content []videoReferenceContent `json:"content"`
 		} `json:"params"`
 	}
 	if json.Unmarshal(request, &input) == nil {
 		for _, content := range input.Params.Content {
 			if content.Text != "" {
 				message = strings.ReplaceAll(message, content.Text, "[redacted-prompt]")
+			}
+			if media := content.mediaURL(); media != nil && media.URL != "" {
+				message = strings.ReplaceAll(message, media.URL, "[redacted-reference]")
 			}
 		}
 	}
@@ -508,6 +534,11 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 			var e *videoProtocolError
 			if errors.As(err, &e) {
 				fields := gin.H{"type": e.code, "code": e.code, "message": e.message, "source": "platform"}
+				switch e.code {
+				case "invalid_video_reference", "video_reference_not_found", "video_reference_expired":
+					fields["type"] = "invalid_request_error"
+					c.Header("Cache-Control", "no-store")
+				}
 				if e.diagnostic != nil {
 					for k, v := range e.diagnostic {
 						fields[k] = v
@@ -618,6 +649,14 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 			return fmt.Errorf("video submission record expired")
 		}
 		return nil
+	}
+	if request.UsesUploadedVideoReference() {
+		items, assets, err := s.resolveVideoReferenceFiles(ctx, key, request.legacyReferences)
+		if err != nil {
+			return nil, err
+		}
+		params["content"] = items
+		submission.ReferenceAssetIDs = assets
 	}
 	if len(images) != 0 {
 		runtime, e := s.videoReferences()

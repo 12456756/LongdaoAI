@@ -44,6 +44,10 @@ type OpenAIVideoRequest struct {
 	spooledReferenceCount int
 	wireBytes             int64
 	legacyImages          []videoReferenceInput
+	referenceContent      []byte
+	legacyReferences      []videoReferenceContent
+	referenceOperation    string
+	uploadedReference     bool
 	legacyValidated       bool
 	fields                map[string]string
 	otherFiles            int
@@ -62,6 +66,20 @@ func ParseOpenAIVideoRequest(body []byte, contentType string) (*OpenAIVideoReque
 		r.moderation = ParseGrokMediaRequest(contentType, body)
 		if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
 			return nil, fmt.Errorf("request body must be a JSON object")
+		}
+		if content := gjson.GetBytes(body, "metadata.content"); content.Exists() {
+			r.referenceContent = []byte(content.Raw)
+			for _, item := range content.Array() {
+				switch item.Get("type").String() {
+				case "video_url":
+					r.referenceOperation = VideoOperationVideo
+					r.uploadedReference = r.uploadedReference || item.Get("video_url.reference_id").Exists()
+				case "image_url":
+					if r.referenceOperation == "" {
+						r.referenceOperation = VideoOperationImage
+					}
+				}
+			}
 		}
 		for _, name := range []string{"model", "prompt", "seconds", "duration", "resolution", "size"} {
 			value := gjson.GetBytes(body, name)
@@ -142,14 +160,16 @@ func finishOpenAIVideoRequest(r *OpenAIVideoRequest, fields map[string]string) (
 	r.Prompt = strings.TrimSpace(fields["prompt"])
 	r.moderation.Model = r.Model
 	r.moderation.Prompt = r.Prompt
-	if r.Model == "" || r.Prompt == "" {
+	if r.Model == "" || (r.Prompt == "" && len(r.referenceContent) == 0) {
 		return nil, fmt.Errorf("model and prompt are required")
 	}
 	seconds := firstNonEmptyString(fields["seconds"], fields["duration"])
-	if seconds != "" {
+	if seconds == "" && r.referenceOperation != "" {
+		r.Seconds = 5
+	} else if seconds != "" {
 		var err error
 		r.Seconds, err = strconv.Atoi(seconds)
-		if err != nil || r.Seconds <= 0 {
+		if err != nil || (r.Seconds <= 0 && (r.referenceOperation == "" || r.Seconds != VideoAutoDuration)) {
 			return nil, fmt.Errorf("seconds or duration must be a positive integer")
 		}
 	}
@@ -159,6 +179,10 @@ func finishOpenAIVideoRequest(r *OpenAIVideoRequest, fields map[string]string) (
 
 func (r *OpenAIVideoRequest) ModerationBody() []byte {
 	return r.moderation.ModerationBody()
+}
+
+func (r *OpenAIVideoRequest) UsesUploadedVideoReference() bool {
+	return r.uploadedReference
 }
 
 // Unknown providers have no reliable default rate card; require administrator pricing.
@@ -276,6 +300,9 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	}
 	if protocol != VideoProtocolOpenAI {
 		return nil, errors.New("unsupported video protocol")
+	}
+	if request != nil && request.UsesUploadedVideoReference() {
+		return nil, videoError(400, "invalid_video_reference", "Uploaded reference videos require a Seedance account using the Naoshengyun legacy protocol.")
 	}
 	base, err := s.validateUpstreamBaseURL(account.GetOpenAIBaseURL())
 	if err != nil {

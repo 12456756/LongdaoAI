@@ -143,6 +143,8 @@ func (g *Group) GetVideoPrice(resolution string) *float64 {
 		return g.VideoPrice720P
 	case VideoBillingResolution1080P:
 		return g.VideoPrice1080P
+	case VideoBillingResolution2K, VideoBillingResolution4K:
+		return nil
 	default:
 		return g.VideoPrice480P
 	}
