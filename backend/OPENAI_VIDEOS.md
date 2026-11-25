@@ -92,7 +92,7 @@ SEP 使用同一把 Longdao API Key 调用 `POST /v1/videos/references`，以 `m
 
 生成请求的 `metadata.content` 使用 `{"type":"video_url","video_url":{"reference_id":"vref_0123456789abcdef0123456789abcdef"},"role":"reference_video"}`。每条 `video_url` 的 `reference_id` 和 `url` 二选一。上传 ID 从上传日起 7 天内可用于新任务，给已派发任务签发的地址继续覆盖现有 7 天任务窗口。部署复用 `video_legacy` 的共享文件目录、容量和签名配置。
 
-错误使用 `{"error":{"type":"...","code":"...","message":"...","source":"platform"}}`。鉴权错误沿用网关格式。SEP 可以记录 `X-Client-Request-ID` 关联问题。
+上传成功和错误都使用完整媒体回执：`operation=upload`、`submission_status=not_applicable`、`task_id=null`、`billing.status=not_charged`、`billing.actual_cost_usd="0"`。成功保留上述素材字段；失败的 `error/operation_error` 保留具体原因，敏感片段脱敏。上传与视频创建的失败缓存隔离。SEP 可以记录 `X-Client-Request-ID` 关联问题。完整字段见 `outputs/sep-media-receipt-contract-20261124.md`。
 
 | HTTP | `error.code` | 原因 |
 | --- | --- | --- |

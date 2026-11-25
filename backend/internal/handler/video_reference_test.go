@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,12 @@ func TestUploadVideoReferenceErrorContract(t *testing.T) {
 			require.Equal(t, tc.status, w.Code, w.Body.String())
 			require.Contains(t, w.Body.String(), `"code":"`+tc.code+`"`)
 			require.Contains(t, w.Body.String(), `"source":"platform"`)
+			var receipt map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &receipt))
+			require.Equal(t, "upload", receipt["operation"])
+			require.Equal(t, "not_applicable", receipt["submission_status"])
+			require.Nil(t, receipt["task_id"])
+			require.Equal(t, "not_charged", receipt["billing"].(map[string]any)["status"])
 		})
 	}
 }

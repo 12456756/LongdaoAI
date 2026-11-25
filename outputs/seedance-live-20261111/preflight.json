@@ -1,0 +1,42 @@
+{
+  "started_at": "2026-11-11T07:25:38.986788+00:00",
+  "url": "https://ai.longdaoec.com/v1/videos",
+  "method": "POST",
+  "purpose": "Deliberately mismatched pricing version; local handler must reject before ForwardVideo. Not a supported dry-run endpoint.",
+  "request": {
+    "model": "seedance-2.0-mini",
+    "prompt": "A red ball rolls slowly across a plain white table. Static camera.",
+    "seconds": 4,
+    "resolution": "480p",
+    "metadata": {
+      "resolution": "480p",
+      "ratio": "16:9",
+      "generate_audio": false
+    }
+  },
+  "pricing_version": "v1:preflight-no-dispatch",
+  "operation": "text-to-video",
+  "http_status": 409,
+  "response_headers": {
+    "Alt-Svc": "h3=\":443\"; ma=2592000",
+    "Cache-Control": "no-store",
+    "Content-Length": "167",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Wed, 11 Nov 2026 07:25:50 GMT",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Via": "1.1 Caddy",
+    "X-Client-Request-Id": "7a016c1f-a7fd-4ee9-a7b2-977a98cf0b71",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-Request-Id": "25ed55ac-6383-4eec-ba5a-be9f7a926cf5",
+    "X-Video-Dispatch": "rejected",
+    "Connection": "close"
+  },
+  "response": {
+    "error": {
+      "code": "video_pricing_changed",
+      "message": "Video pricing or request parameters changed; obtain a new quote before submitting",
+      "type": "invalid_request_error"
+    }
+  }
+}

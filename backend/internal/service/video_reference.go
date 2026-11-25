@@ -55,11 +55,14 @@ func newVideoReferenceRuntime(cfg config.VideoLegacyConfig, store VideoStateStor
 		return nil, fmt.Errorf("video reference directory must be absolute")
 	}
 	if err := os.MkdirAll(cfg.ReferenceDir, 0700); err != nil {
-		return nil, fmt.Errorf("create video reference directory")
+		return nil, fmt.Errorf("create video reference directory: %w", err)
 	}
 	info, err := os.Lstat(cfg.ReferenceDir)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("invalid video reference root")
+	if err != nil {
+		return nil, fmt.Errorf("inspect video reference directory: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("video reference root must be a directory and must not be a symbolic link")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &videoReferenceRuntime{cfg: cfg, store: store, uploads: make(chan struct{}, cfg.UploadConcurrency), downloads: make(chan struct{}, cfg.ReferenceDownloadConcurrency), cancel: cancel, done: make(chan struct{}), now: time.Now}

@@ -618,6 +618,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	MarkMediaDispatched(c)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -649,6 +650,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -889,10 +891,19 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http
 			contentType = upstreamType
 		}
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	count := extractOpenAIImageCountFromJSONBytes(body)
+	if count > 0 {
+		SetSynchronousImageSuccess(c)
+	}
+	c.Header("Content-Type", contentType)
+	if kind, _ := MediaEndpoint(c); kind != "" {
+		WriteMediaRawJSON(c, resp.StatusCode, body)
+	} else {
+		c.Data(resp.StatusCode, contentType, body)
+	}
 
 	usage, _ := extractOpenAIUsageFromJSONBytes(body)
-	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
+	return usage, count, collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
@@ -931,6 +942,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 		fallbackBytes = 0
 		mergeOpenAIUsage(&usage, dataBytes)
 		imageCounter.AddSSEData(dataBytes)
+		if imageCounter.Count() > 0 {
+			MarkMediaBillable(c)
+		}
 	}
 
 	flushSSEEvent := func() {

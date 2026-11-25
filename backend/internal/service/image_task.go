@@ -33,31 +33,40 @@ var (
 // ImageTaskRecord is the private Redis representation of an asynchronous image
 // request. Ownership fields are intentionally omitted from the public view.
 type ImageTaskRecord struct {
-	ID          string          `json:"id"`
-	UserID      int64           `json:"user_id"`
-	APIKeyID    int64           `json:"api_key_id"`
-	Status      string          `json:"status"`
-	HTTPStatus  int             `json:"http_status,omitempty"`
-	Result      json.RawMessage `json:"result,omitempty"`
-	Error       json.RawMessage `json:"error,omitempty"`
-	CreatedAt   int64           `json:"created_at"`
-	CompletedAt *int64          `json:"completed_at,omitempty"`
-	ExpiresAt   int64           `json:"expires_at"`
+	Provider    *AsyncImageMetadata `json:"provider,omitempty"`
+	ID          string              `json:"id"`
+	UserID      int64               `json:"user_id"`
+	APIKeyID    int64               `json:"api_key_id"`
+	Status      string              `json:"status"`
+	HTTPStatus  int                 `json:"http_status,omitempty"`
+	Result      json.RawMessage     `json:"result,omitempty"`
+	Error       json.RawMessage     `json:"error,omitempty"`
+	CreatedAt   int64               `json:"created_at"`
+	CompletedAt *int64              `json:"completed_at,omitempty"`
+	ExpiresAt   int64               `json:"expires_at"`
 }
 
 // ImageTask is the API-safe task representation returned to callers.
 type ImageTask struct {
-	ID          string          `json:"id"`
-	TaskID      string          `json:"task_id"`
-	Object      string          `json:"object"`
-	Status      string          `json:"status"`
-	HTTPStatus  int             `json:"http_status,omitempty"`
-	ImageURL    string          `json:"image_url,omitempty"`
-	Result      json.RawMessage `json:"result,omitempty"`
-	Error       json.RawMessage `json:"error,omitempty"`
-	CreatedAt   int64           `json:"created_at"`
-	CompletedAt *int64          `json:"completed_at,omitempty"`
-	ExpiresAt   int64           `json:"expires_at"`
+	SchemaVersion     int                     `json:"schema_version,omitempty"`
+	RequestID         string                  `json:"request_id,omitempty"`
+	SubmissionStatus  string                  `json:"submission_status,omitempty"`
+	UpstreamStatus    string                  `json:"upstream_status,omitempty"`
+	UpstreamRequestID string                  `json:"upstream_request_id,omitempty"`
+	ContentURL        string                  `json:"content_url,omitempty"`
+	OperationError    any                     `json:"operation_error,omitempty"`
+	Billing           *ImageTaskBillingStatus `json:"billing,omitempty"`
+	ID                string                  `json:"id"`
+	TaskID            string                  `json:"task_id"`
+	Object            string                  `json:"object"`
+	Status            string                  `json:"status"`
+	HTTPStatus        int                     `json:"http_status,omitempty"`
+	ImageURL          string                  `json:"image_url,omitempty"`
+	Result            json.RawMessage         `json:"result,omitempty"`
+	Error             json.RawMessage         `json:"error,omitempty"`
+	CreatedAt         int64                   `json:"created_at"`
+	CompletedAt       *int64                  `json:"completed_at,omitempty"`
+	ExpiresAt         int64                   `json:"expires_at"`
 }
 
 type ImageTaskOwner struct {
@@ -203,7 +212,7 @@ func imageTaskToPublic(task *ImageTaskRecord) *ImageTask {
 	if task == nil {
 		return nil
 	}
-	return &ImageTask{
+	output := &ImageTask{
 		ID:          task.ID,
 		TaskID:      task.ID,
 		Object:      "image.generation.task",
@@ -216,6 +225,21 @@ func imageTaskToPublic(task *ImageTaskRecord) *ImageTask {
 		CompletedAt: task.CompletedAt,
 		ExpiresAt:   task.ExpiresAt,
 	}
+	if p := task.Provider; p != nil {
+		output.SchemaVersion = 2
+		output.RequestID, output.SubmissionStatus, output.UpstreamStatus = p.RequestID, p.SubmissionStatus, p.UpstreamStatus
+		output.UpstreamRequestID = p.UpstreamRequestID
+		output.Billing = &ImageTaskBillingStatus{Status: "pending"}
+		if p.SubmissionStatus == "failed" {
+			output.Billing = imageNotCharged()
+		}
+		if task.Status == ImageTaskStatusCompleted {
+			output.ContentURL = "/v1/images/tasks/" + task.ID + "/content"
+			output.ImageURL = output.ContentURL
+			output.Result, _ = json.Marshal(map[string]any{"data": []map[string]string{{"url": output.ContentURL}}})
+		}
+	}
+	return output
 }
 
 func firstImageTaskURL(result json.RawMessage) string {

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -124,4 +126,24 @@ func TestUploadedVideoReferenceRequiresExactlyOneSource(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status)
 		require.Equal(t, "invalid_video_reference", code)
 	}
+}
+
+func TestReferenceStorageErrorPreservesCauseAndRedactsOnlySensitiveFragments(t *testing.T) {
+	cause := &os.PathError{Op: "write", Path: "/var/private/video.mp4", Err: errors.New("no space left on device; token=fixture-secret")}
+	err := referenceStorageError("Save reference video file", cause)
+	require.ErrorIs(t, err, cause)
+	status, code, message := VideoRequestErrorDetails(err)
+	require.Equal(t, 503, status)
+	require.Equal(t, "video_reference_storage_error", code)
+	require.Contains(t, message, "Save reference video file")
+	require.Contains(t, message, "no space left on device")
+	require.NotContains(t, message, "/var/private")
+	require.NotContains(t, message, "fixture-secret")
+	capacity := videoError(503, "video_reference_capacity_exceeded", "Reference storage capacity: used=1024 required=512 limit=1024 free=4096 minimum_free_after_save=2048 bytes")
+	wrapped := fmt.Errorf("capacity check: %w", capacity)
+	require.Same(t, wrapped, referenceStorageError("Check reference video storage capacity", wrapped))
+	status, code, message = VideoRequestErrorDetails(wrapped)
+	require.Equal(t, 503, status)
+	require.Equal(t, "video_reference_capacity_exceeded", code)
+	require.Contains(t, message, "used=1024 required=512")
 }

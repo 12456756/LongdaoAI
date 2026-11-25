@@ -84,9 +84,9 @@ func TestVideoPricingHTTPContract(t *testing.T) {
 			for key := range raw {
 				keys = append(keys, key)
 			}
-			require.ElementsMatch(t, []string{"object", "schema_version", "currency", "model", "operation", "resolution", "duration_seconds", "billing_mode", "pricing_status", "pricing_source", "pricing_authority", "amount_usd", "pricing_version", "effective_rate_multiplier", "observed_at", "expires_at"}, keys)
+			require.ElementsMatch(t, []string{"object", "schema_version", "currency", "model", "operation", "resolution", "duration_seconds", "billing_mode", "pricing_status", "pricing_source", "pricing_authority", "amount_usd", "pricing_version", "effective_rate_multiplier", "observed_at", "expires_at", "request_id", "task_id", "submission_status", "status", "is_final", "status_observed_at", "status_source", "task_error", "operation_error", "error", "billing", "submission_retry", "submission_error", "receipt_operation"}, keys)
 			require.Equal(t, "sub2api.video_pricing", response.Object)
-			require.Equal(t, 1, response.SchemaVersion)
+			require.Equal(t, 2, response.SchemaVersion)
 			require.Equal(t, "USD", response.Currency)
 			require.Equal(t, videoPricingRequest{"minimax-h3", "image-to-video", "720p", 4}, response.videoPricingRequest)
 			require.Equal(t, tc.mode, response.BillingMode)
@@ -258,67 +258,67 @@ func TestVideoUsageHTTPSettlesOnlyReliableVideoEvidence(t *testing.T) {
 			e.ActualCostUSD = videoContractPtr("0")
 			return e
 		}, want: "settled"},
-		{name: "absent or ambiguous", change: func(_ *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence { return nil }, want: "pending"},
+		{name: "absent or ambiguous", change: func(_ *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence { return nil }, want: "unknown"},
 		{name: "dedup missing", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.TransactionConfirmed = false
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "image", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.BillingMode = "image"
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "per request is not video evidence", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.BillingMode = "per_request"
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "token", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.BillingMode = "token"
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "missing model", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.Model = nil
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "missing amount", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = nil
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "negative amount", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = videoContractPtr("-0.1")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "negative underflow must not become zero", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = videoContractPtr("-1e-9999")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "non decimal amount", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = videoContractPtr("not-money")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "nan", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = videoContractPtr("NaN")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "infinity", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.ActualCostUSD = videoContractPtr("1e9999")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "no videos", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.VideoCount = videoContractPtr(0)
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "missing count", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.VideoCount = nil
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "missing duration", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.DurationSeconds = nil
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "zero duration", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.DurationSeconds = videoContractPtr(0)
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "confirmed automatic duration", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.DurationSeconds = videoContractPtr(service.VideoAutoDuration)
 			e.Resolution = videoContractPtr("2k")
@@ -327,11 +327,11 @@ func TestVideoUsageHTTPSettlesOnlyReliableVideoEvidence(t *testing.T) {
 		{name: "missing resolution", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.Resolution = nil
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 		{name: "unsupported resolution", change: func(e *service.VideoRequestBillingEvidence) *service.VideoRequestBillingEvidence {
 			e.Resolution = videoContractPtr("8k")
 			return e
-		}, want: "pending"},
+		}, want: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evidence := validVideoEvidence()
@@ -351,9 +351,9 @@ func TestVideoUsageHTTPSettlesOnlyReliableVideoEvidence(t *testing.T) {
 			for key := range raw {
 				keys = append(keys, key)
 			}
-			require.ElementsMatch(t, []string{"object", "schema_version", "currency", "request_id", "status", "model", "actual_cost_usd", "video_count", "duration_seconds", "resolution"}, keys)
+			require.ElementsMatch(t, []string{"object", "schema_version", "currency", "request_id", "status", "model", "actual_cost_usd", "video_count", "duration_seconds", "resolution", "operation", "task_id", "submission_status", "is_final", "status_observed_at", "status_source", "task_error", "operation_error", "error", "billing", "submission_retry", "submission_error", "receipt_operation"}, keys)
 			require.Equal(t, "sub2api.video_request_usage", response.Object)
-			require.Equal(t, 1, response.SchemaVersion)
+			require.Equal(t, 2, response.SchemaVersion)
 			require.Equal(t, "USD", response.Currency)
 			require.Equal(t, "client:req-1", response.RequestID)
 			require.Equal(t, tc.want, response.Status)
@@ -411,7 +411,7 @@ func TestVideoUsageHTTPStrictSEPProjection(t *testing.T) {
 			require.Equal(t, http.StatusOK, recorder.Code)
 			var raw map[string]any
 			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &raw))
-			require.Equal(t, "pending", raw["status"])
+			require.Equal(t, "unknown", raw["status"])
 			require.Contains(t, raw, tc.field)
 			require.Nil(t, raw[tc.field])
 			require.Nil(t, raw["actual_cost_usd"])

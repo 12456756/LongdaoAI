@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1053,13 +1054,19 @@ func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUps
 			c.Header("X-Upstream-Request-ID", errordetail.Text(err.UpstreamRequestID))
 		}
 	}
-	c.JSON(err.clientStatusCode(), gin.H{
+	WriteMediaJSON(c, err.clientStatusCode(), gin.H{
 		"error": errordetail.Value(map[string]any(errorObj)),
 	})
 	return true
 }
 
 func (s *OpenAIGatewayService) writeOpenAIImagesStreamEvent(c *gin.Context, flusher http.Flusher, eventName string, payload []byte) error {
+	if eventName == "error" {
+		var fields map[string]any
+		if json.Unmarshal(payload, &fields) == nil {
+			payload, _ = json.Marshal(CompleteMediaReceipt(c, 502, fields))
+		}
+	}
 	if strings.TrimSpace(eventName) != "" {
 		if _, err := fmt.Fprintf(c.Writer, "event: %s\n", eventName); err != nil {
 			return err
@@ -1323,7 +1330,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 		return OpenAIUsage{}, 0, nil, err
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	c.Data(resp.StatusCode, "application/json; charset=utf-8", responseBody)
+	SetSynchronousImageSuccess(c)
+	WriteMediaRawJSON(c, resp.StatusCode, responseBody)
 	return usage, len(results), openAIResponsesImageResultSizes(results), nil
 }
 
@@ -1469,6 +1477,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 			}
 			imageCount = len(emitted)
+			if imageCount > 0 {
+				MarkMediaBillable(c)
+			}
 			imageOutputSizes = openAIResponsesImageResultSizes(finalResults)
 			processDataDone = true
 		case "error", "response.failed":
@@ -1525,6 +1536,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, eventName, payload)
 			}
 			imageCount = len(emitted)
+			if imageCount > 0 {
+				MarkMediaBillable(c)
+			}
 			imageOutputSizes = openAIResponsesImageResultSizes(finalResults)
 			return nil
 		}

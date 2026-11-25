@@ -1497,6 +1497,8 @@ func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapabilit
 		return false
 	}
 	switch capability {
+	case OpenAIImagesCapabilityAsync:
+		return a.Type == AccountTypeAPIKey && a.ImageProtocol() == ImageProtocolNaoshengyun
 	case OpenAIImagesCapabilityBasic, OpenAIImagesCapabilityNative:
 		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey
 	default:

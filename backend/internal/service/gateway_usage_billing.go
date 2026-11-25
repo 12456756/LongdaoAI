@@ -70,6 +70,8 @@ type usageLogBestEffortWriter interface {
 
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
+	DeferredVideo         bool
+	DeferredImage         bool
 	Cost                  *CostBreakdown
 	User                  *User
 	APIKey                *APIKey
@@ -228,6 +230,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 
 	cmd := &UsageBillingCommand{
+		DeferredVideo:      p.DeferredVideo,
+		DeferredImage:      p.DeferredImage,
 		RequestID:          requestID,
 		APIKeyID:           p.APIKey.ID,
 		UserID:             p.User.ID,

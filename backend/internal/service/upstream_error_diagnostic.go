@@ -192,7 +192,7 @@ func writeUpstreamError(c *gin.Context, status int, errorType, message string, a
 	if anthropic {
 		b["type"] = "error"
 	}
-	c.JSON(status, b)
+	WriteMediaJSON(c, status, b)
 }
 
 func upstreamDiagnosticJSON(c *gin.Context, errorType, message string) []byte {

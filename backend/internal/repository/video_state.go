@@ -40,6 +40,12 @@ func (c *gatewayCache) VideoDeleteIfEqual(ctx context.Context, key string, data 
 	return c.rdb.Eval(ctx, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{key}, data).Err()
 }
 
+func (c *gatewayCache) VideoReplaceIfEqual(ctx context.Context, key string, previous, data []byte) (bool, error) {
+	updated, err := c.rdb.Eval(ctx, `if redis.call('GET',KEYS[1])~=ARGV[1] then return 0 end
+redis.call('SET',KEYS[1],ARGV[2],'XX','KEEPTTL'); return 1`, []string{key}, previous, data).Int()
+	return updated == 1, err
+}
+
 func (c *gatewayCache) VideoBind(ctx context.Context, m *service.VideoTaskMetadata) error {
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -68,6 +74,32 @@ func (c *gatewayCache) VideoStatus(ctx context.Context, key, status string) (str
  local m=cjson.decode(v); local old=m.last_status
  if old=='completed' or old=='failed' or old=='cancelled' then return old end
  m.last_status=ARGV[1]; redis.call('SET',KEYS[1],cjson.encode(m),'XX','KEEPTTL'); return ARGV[1]`, []string{key}, status).Text()
+}
+
+func (c *gatewayCache) VideoObserve(ctx context.Context, key, status string, observed int64, failure map[string]any) (*service.VideoTaskMetadata, error) {
+	detail, err := json.Marshal(failure)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.rdb.Eval(ctx, `local v=redis.call('GET',KEYS[1]); if not v then return redis.error_reply('missing video metadata') end
+local m=cjson.decode(v); local old=m.last_status
+if old=='completed' or old=='failed' or old=='cancelled' then
+ if old==ARGV[1] and tonumber(m.observed_at or 0)<=tonumber(ARGV[2]) then
+ m.observed_at=tonumber(ARGV[2]); if ARGV[3]~='null' then m.task_error=cjson.decode(ARGV[3]) end
+ local updated=cjson.encode(m); redis.call('SET',KEYS[1],updated,'XX','KEEPTTL'); return updated end
+ return v end
+if tonumber(m.observed_at or 0)>tonumber(ARGV[2]) then return v end
+if old=='in_progress' and ARGV[1]=='queued' then return v end
+m.last_status=ARGV[1]; m.observed_at=tonumber(ARGV[2]); m.task_error=cjson.decode(ARGV[3])
+	local updated=cjson.encode(m); redis.call('SET',KEYS[1],updated,'XX','KEEPTTL'); return updated`, []string{key}, status, observed, string(detail)).Text()
+	if err != nil {
+		return nil, err
+	}
+	var meta service.VideoTaskMetadata
+	if err = json.Unmarshal([]byte(data), &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
 }
 
 func (c *gatewayCache) VideoSaveReference(ctx context.Context, r *service.VideoReference) error {

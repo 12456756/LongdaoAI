@@ -395,6 +395,7 @@ func TestLegacyVideoMultiReferenceOrderReplayAndRollback(t *testing.T) {
 		}
 		return legacyTestResponse(202, "seedance-2.0", "queued", ""), nil
 	}}
+	idempotencyKey := "multiple-images"
 	submit := func(images ...[]byte) (int, string, error) {
 		body, ct := videoMultipartFixture(t, images...)
 		r, err := ParseOpenAIVideoUpload(bytes.NewReader(body), ct)
@@ -402,7 +403,7 @@ func TestLegacyVideoMultiReferenceOrderReplayAndRollback(t *testing.T) {
 		defer r.Close()
 		c, w := videoTestContext("POST", "/v1/videos", nil, ct)
 		c.Request.Header.Set("X-Video-Operation", "image-to-video")
-		c.Request.Header.Set("Idempotency-Key", "multiple-images")
+		c.Request.Header.Set("Idempotency-Key", idempotencyKey)
 		_, err = svc.ForwardVideo(context.Background(), c, legacyTestAccount(), key, r, "", false, "")
 		return w.Code, w.Body.String(), err
 	}
@@ -410,7 +411,7 @@ func TestLegacyVideoMultiReferenceOrderReplayAndRollback(t *testing.T) {
 	require.Equal(t, 503, status)
 	require.ErrorContains(t, err, "Save input_reference[2]: register video reference in Redis: test Redis write failed")
 	require.Empty(t, store.references)
-	require.Empty(t, store.records)
+	require.NotEmpty(t, store.records, "Keep the submission failure so the client can query its cause")
 	require.Zero(t, calls)
 	require.NoError(t, filepath.WalkDir(cfg.VideoLegacy.ReferenceDir, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -419,6 +420,7 @@ func TestLegacyVideoMultiReferenceOrderReplayAndRollback(t *testing.T) {
 		require.False(t, strings.HasSuffix(entry.Name(), ".png"))
 		return nil
 	}))
+	idempotencyKey = "multiple-images-new-attempt"
 	status, _, err = submit(first, second)
 	require.NoError(t, err)
 	require.Equal(t, 202, status)

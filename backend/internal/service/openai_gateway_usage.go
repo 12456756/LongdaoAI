@@ -20,6 +20,9 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
+	DeferredVideo      bool
+	DeferredImage      bool
+	FrozenImageBilling *AsyncImageBillingSnapshot
 	Result             *OpenAIForwardResult
 	APIKey             *APIKey
 	User               *User
@@ -195,7 +198,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 	longContextBillingEnabled := billingAccount.IsOpenAILongContextBillingEnabled()
-	if input.FrozenVideoBilling != nil {
+	if input.FrozenImageBilling != nil {
+		cost, err = input.FrozenImageBilling.recordCost(input)
+		if err != nil {
+			return err
+		}
+		imageMultiplier = input.FrozenImageBilling.Multiplier
+	} else if input.FrozenVideoBilling != nil {
 		cost, err = input.FrozenVideoBilling.recordCost(input)
 		if err != nil {
 			return err
@@ -374,8 +383,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
+	var billingApplied bool
 	billingErr := func() error {
-		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		var err error
+		billingApplied, err = applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+			DeferredVideo:         input.DeferredVideo,
+			DeferredImage:         input.DeferredImage,
 			Cost:                  cost,
 			User:                  user,
 			APIKey:                apiKey,
@@ -392,6 +405,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if billingErr != nil {
 		return billingErr
+	}
+	if (input.DeferredVideo || input.DeferredImage) && !billingApplied {
+		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 

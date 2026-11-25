@@ -123,7 +123,7 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 	sum := sha256.Sum256(fingerprint)
 	response.PricingVersion = "v1:" + hex.EncodeToString(sum[:])
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, response)
+	service.WriteMediaJSON(c, http.StatusOK, response)
 }
 
 type requestUsageResponse struct {
@@ -148,6 +148,20 @@ func (h *GatewayHandler) RequestImageUsage(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "A valid request_id is required")
 		return
 	}
+	outcome, outcomeErr := h.openAIGatewayService.ImageRequestOutcome(c.Request.Context(), key, id)
+	if outcomeErr != nil {
+		h.errorResponse(c, 503, "api_error", localDiagnosticMessage("Read asynchronous image billing", outcomeErr, ""))
+		return
+	}
+	if outcome != nil {
+		pendingReason := ""
+		if outcome.Status == "pending" {
+			pendingReason = "awaiting_confirmed_image_success_or_settlement"
+		}
+		c.Header("Cache-Control", "no-store")
+		service.WriteMediaJSON(c, http.StatusOK, gin.H{"object": "sub2api.request_usage", "schema_version": 2, "currency": "USD", "request_id": id, "status": outcome.Status, "model": outcome.Model, "actual_cost_usd": outcome.ActualCostUSD, "pending_reason": pendingReason})
+		return
+	}
 	evidence, err := h.openAIGatewayService.RequestImageBilling(c.Request.Context(), key, id)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read image request billing", err, ""))
@@ -167,8 +181,23 @@ func (h *GatewayHandler) RequestImageUsage(c *gin.Context) {
 			}
 		}
 	}
+	if evidence == nil {
+		receipt, err := h.openAIGatewayService.MediaFailure(c.Request.Context(), key, "image", id)
+		if err != nil {
+			h.errorResponse(c, 503, "image_receipt_unavailable", localDiagnosticMessage("Read saved image failure", err, ""))
+			return
+		}
+		if receipt != nil {
+			receipt["operation"] = "usage"
+			receipt["object"], receipt["currency"] = "sub2api.request_usage", "USD"
+			receipt["status"], receipt["actual_cost_usd"], receipt["pending_reason"] = "not_charged", "0", ""
+			receipt["error"], receipt["operation_error"] = nil, nil
+			service.WriteMediaJSON(c, 200, receipt)
+			return
+		}
+	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, response)
+	service.WriteMediaJSON(c, http.StatusOK, response)
 }
 
 func reliableImageBillingEvidence(evidence *service.RequestBillingEvidence) bool {

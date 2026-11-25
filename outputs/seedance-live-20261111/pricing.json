@@ -1,0 +1,329 @@
+{
+  "checked_at": "2026-11-11T07:24:10.277553+00:00",
+  "quotes": [
+    {
+      "request": {
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:c0445b0ef925fb6cfde3e53690aa3d800267d2855f6541583b3148a660f8584c",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:20.743503791Z",
+        "expires_at": "2026-11-11T07:25:20.743503791Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:240167dd6b17cc3bf1df30ac933f6b5a535f8890a80f8f6f8b2cad9fe53d8763",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:20.752695186Z",
+        "expires_at": "2026-11-11T07:25:20.752695186Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:db813a0fc62defe7689ddfed57620683379adb978e5560e8040e9379d881b95e",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:20.759524142Z",
+        "expires_at": "2026-11-11T07:25:20.759524142Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:4e6408ba132bae2a36cf9c471c183e24748bdae0a5d56c5553962c0d576afba3",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:20.944398393Z",
+        "expires_at": "2026-11-11T07:25:20.944398393Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:1e7ba166d63675c3c7584bc0fa4eb754d143152d5cd6ea3e81d52c201635138d",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:20.964180924Z",
+        "expires_at": "2026-11-11T07:25:20.964180924Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-fast",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:5a446aed1fb8283cf140b15b1cdb4fc417efacaf2966193d56b477ef0f6aa592",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.012098063Z",
+        "expires_at": "2026-11-11T07:25:21.012098063Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:9ae20930241ae83d3bc6056cfffcd6e7bcea5192c5cefb4655d975b10e86781f",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.109585067Z",
+        "expires_at": "2026-11-11T07:25:21.109585067Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:a9df70f3ffecae95a3e23eb199f293297e0c41affe9d4f70d08519acdb48ddac",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.116073565Z",
+        "expires_at": "2026-11-11T07:25:21.116073565Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.0-mini",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:2424d197d2246d94bb39dbe3ac2c238add41458e408084f7a26bf6a022341622",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.176079453Z",
+        "expires_at": "2026-11-11T07:25:21.176079453Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "480p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:3be7fddaf42169c9849964b5b238d3bc7d5267123114e73a2cb10b45b9d6b221",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.281140277Z",
+        "expires_at": "2026-11-11T07:25:21.281140277Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:56641637af158d48fbd40283559b6623133968030733a2864c981ccc2f285c34",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.282788979Z",
+        "expires_at": "2026-11-11T07:25:21.282788979Z"
+      }
+    },
+    {
+      "request": {
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4
+      },
+      "http_status": 200,
+      "response": {
+        "object": "sub2api.video_pricing",
+        "schema_version": 1,
+        "currency": "USD",
+        "model": "seedance-2.5",
+        "operation": "text-to-video",
+        "resolution": "1080p",
+        "duration_seconds": 4,
+        "billing_mode": "video",
+        "pricing_status": "quoted",
+        "pricing_source": "group",
+        "pricing_authority": "sub2api_customer_billing",
+        "amount_usd": "4.0000000000",
+        "pricing_version": "v1:a3d4bef93d18a26c268f6b0d0e3ddae734aad1b05d2361f21d1fa5cc1fb29555",
+        "effective_rate_multiplier": 1,
+        "observed_at": "2026-11-11T07:24:21.329364521Z",
+        "expires_at": "2026-11-11T07:25:21.329364521Z"
+      }
+    }
+  ]
+}

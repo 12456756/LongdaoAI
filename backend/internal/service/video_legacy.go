@@ -38,10 +38,30 @@ type videoProtocolError struct {
 	code, message string
 	cause         error
 	diagnostic    map[string]any
+	rejected      bool
+	notDispatched bool
 }
 
 func (e *videoProtocolError) Error() string { return e.message }
 func (e *videoProtocolError) Unwrap() error { return e.cause }
+
+func (e *videoProtocolError) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{"status": e.status, "code": e.code, "message": e.message, "diagnostic": e.diagnostic, "rejected": e.rejected})
+}
+func (e *videoProtocolError) UnmarshalJSON(data []byte) error {
+	var value struct {
+		Status     int            `json:"status"`
+		Code       string         `json:"code"`
+		Message    string         `json:"message"`
+		Diagnostic map[string]any `json:"diagnostic"`
+		Rejected   bool           `json:"rejected"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	e.status, e.code, e.message, e.diagnostic, e.rejected = value.Status, value.Code, value.Message, value.Diagnostic, value.Rejected
+	return nil
+}
 
 func videoCause(status int, code, message string, cause error) error {
 	return &videoProtocolError{status: status, code: code, message: errordetail.Text(message + ": " + cause.Error()), cause: cause}
@@ -89,11 +109,12 @@ func (t *legacyVideoTask) UnmarshalJSON(body []byte) error {
 }
 
 type normalizedVideoTask struct {
-	Object string `json:"object"`
-	ID     string `json:"id"`
-	Model  string `json:"model"`
-	Status string `json:"status"`
-	Error  any    `json:"error,omitempty"`
+	videoContract
+	Object string         `json:"object"`
+	ID     any            `json:"id"`
+	Model  string         `json:"model,omitempty"`
+	Status any            `json:"status"`
+	Error  map[string]any `json:"error,omitempty"`
 }
 
 func legacyStatus(t *legacyVideoTask) (string, error) {
@@ -101,7 +122,7 @@ func legacyStatus(t *legacyVideoTask) (string, error) {
 	status, ok := statuses[t.Status]
 	final := status == "completed" || status == "failed" || status == "cancelled"
 	if !ok || t.Final == nil || *t.Final != final {
-		return "", videoError(502, "video_protocol_error", "Invalid upstream video status")
+		return "", videoError(502, "video_protocol_error", fmt.Sprintf("Invalid upstream video status=%q, is_final=%s", t.Status, mustVideoDiagnosticJSON(t.Final)))
 	}
 	return status, nil
 }
@@ -124,6 +145,9 @@ func decodeLegacyTask(data []byte, expectedID, model string) (*legacyVideoTask, 
 	}
 	if expectedID == "" && envelope.Message != "accepted" {
 		return nil, videoError(502, "video_protocol_error", "Invalid upstream acceptance response")
+	}
+	if expectedID != "" && envelope.Message != "success" {
+		return task, videoError(502, "video_protocol_error", "Invalid upstream task response: expected message=success")
 	}
 	if _, err := legacyStatus(task); err != nil {
 		return nil, err
@@ -314,16 +338,25 @@ func (s *OpenAIGatewayService) legacyParams(request *OpenAIVideoRequest, model, 
 }
 
 type videoSubmission struct {
-	SchemaVersion     int                `json:"schema_version"`
-	SemanticSHA256    string             `json:"semantic_sha256"`
-	AccountID         int64              `json:"account_id"`
-	Protocol          string             `json:"protocol"`
-	State             string             `json:"state"`
-	ReferenceAssetID  string             `json:"reference_asset_id,omitempty"`
-	ReferenceAssetIDs []string           `json:"reference_asset_ids,omitempty"`
-	BillingRequestID  string             `json:"billing_request_id"`
-	Task              *VideoTaskMetadata `json:"task,omitempty"`
-	ExpiresAt         int64              `json:"expires_at"`
+	SchemaVersion     int                   `json:"schema_version"`
+	SemanticSHA256    string                `json:"semantic_sha256"`
+	AccountID         int64                 `json:"account_id"`
+	Protocol          string                `json:"protocol"`
+	State             string                `json:"state"`
+	ReferenceAssetID  string                `json:"reference_asset_id,omitempty"`
+	ReferenceAssetIDs []string              `json:"reference_asset_ids,omitempty"`
+	BillingRequestID  string                `json:"billing_request_id"`
+	Task              *VideoTaskMetadata    `json:"task,omitempty"`
+	ExpiresAt         int64                 `json:"expires_at"`
+	RequestID         string                `json:"request_id,omitempty"`
+	APIKeyID          int64                 `json:"api_key_id,omitempty"`
+	GroupID           int64                 `json:"group_id,omitempty"`
+	UpstreamModel     string                `json:"upstream_model,omitempty"`
+	Billing           *VideoBillingSnapshot `json:"billing,omitempty"`
+	BillingRegistered bool                  `json:"billing_registered,omitempty"`
+	Failure           *videoProtocolError   `json:"failure,omitempty"`
+	Retry             *VideoSubmissionRetry `json:"submission_retry,omitempty"`
+	DispatchDeadline  int64                 `json:"dispatch_deadline,omitempty"`
 }
 
 func legacyVideoSemanticHash(model, upstreamModel string, params map[string]any, images []videoReferenceInput) string {
@@ -349,20 +382,31 @@ func legacyVideoSemanticHash(model, upstreamModel string, params map[string]any,
 }
 
 func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Account, task string, body []byte, idem string) (*legacyVideoTask, error) {
+	method := http.MethodGet
+	if body != nil {
+		method = http.MethodPost
+	}
+	return s.legacyRequestMethod(ctx, account, task, body, idem, method)
+}
+
+func (s *OpenAIGatewayService) legacyRequestMethod(ctx context.Context, account *Account, task string, body []byte, idem, method string) (*legacyVideoTask, error) {
 	base, err := s.validateUpstreamBaseURL(account.GetOpenAIBaseURL())
 	if err != nil {
-		return nil, videoError(503, "video_configuration_error", "Invalid legacy upstream base URL")
+		failure := videoCause(503, "video_configuration_error", "Validate legacy upstream base URL", err).(*videoProtocolError)
+		failure.notDispatched = true
+		return nil, failure
 	}
 	target, err := legacyVideoURL(base, task)
 	if err != nil {
 		return nil, err
 	}
-	method := http.MethodGet
-	if body != nil {
-		method = http.MethodPost
+	if method == http.MethodPut {
+		target += "/cancel"
 	}
 	if account.GetOpenAIApiKey() == "" {
-		return nil, videoError(503, "video_configuration_error", "Video account is missing api_key")
+		failure := videoError(503, "video_configuration_error", "Video account is missing api_key").(*videoProtocolError)
+		failure.notDispatched = true
+		return nil, failure
 	}
 	requestContext := WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI))
 	req, err := http.NewRequestWithContext(requestContext, method, target, bytes.NewReader(body))
@@ -370,7 +414,7 @@ func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Accou
 		return nil, err
 	}
 	// A paid POST must not be replayed by the transport after an ambiguous failure.
-	if body != nil {
+	if method != http.MethodGet {
 		req.GetBody = nil
 	}
 	account.ApplyHeaderOverrides(req.Header)
@@ -399,9 +443,13 @@ func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Accou
 		expected = http.StatusAccepted
 	}
 	if resp.StatusCode != expected {
-		errorBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 65536))
+		errorBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 65537))
+		truncated := len(errorBody) > 65536
+		if truncated {
+			errorBody = errorBody[:65536]
+		}
 		errorBody = []byte(sanitizeLegacyErrorMessage(string(errorBody), body, account.GetOpenAIApiKey()))
-		detail := legacyErrorMessage(errorBody, nil, "")
+		detail := legacyErrorMessage(legacyErrorFields(errorBody), nil, "")
 		slog.Warn("video_legacy.upstream_rejected", "account_id", account.ID, "task_id", task, "operation", method, "status", resp.StatusCode, "upstream_request_id", errordetail.RequestID(resp.Header), "reason", detail, "read_error", safeVideoError(readErr))
 		status, code := 502, "video_upstream_error"
 		if resp.StatusCode == 429 {
@@ -410,10 +458,31 @@ func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Accou
 		if resp.StatusCode == 404 && body == nil {
 			status, code = 404, "not_found_error"
 		}
-		failure := videoUpstreamError(status, code, resp.StatusCode, resp.Header, errorBody)
+		failure := videoUpstreamError(status, code, resp.StatusCode, resp.Header, legacyErrorFields(errorBody))
+		var recovered struct {
+			Code *int             `json:"code"`
+			Data *legacyVideoTask `json:"data"`
+		}
+		_ = json.Unmarshal(errorBody, &recovered)
+		failure.(*videoProtocolError).rejected = resp.StatusCode >= 400 || (recovered.Code != nil && *recovered.Code != 0) || UpstreamBodyError(errorBody)
+		if truncated {
+			failure.(*videoProtocolError).diagnostic["body_truncated"] = true
+			failure.(*videoProtocolError).diagnostic["body_limit_bytes"] = 65536
+		}
+		if resp.StatusCode == 409 && method == http.MethodPut {
+			failure.(*videoProtocolError).status = 409
+			failure.(*videoProtocolError).code = "video_cancel_conflict"
+		}
+		if retry := resp.Header.Get("Retry-After"); retry != "" && len(retry) <= 256 && !strings.ContainsAny(retry, "\r\n") {
+			failure.(*videoProtocolError).diagnostic["retry_after"] = errordetail.Text(retry)
+		}
 		if readErr != nil {
 			failure.(*videoProtocolError).cause = readErr
 			failure.(*videoProtocolError).diagnostic["body_read_error"] = errordetail.Text(readErr.Error())
+		}
+		if recovered.Data != nil && legacyTaskPattern.MatchString(recovered.Data.ID) {
+			recovered.Data.UpstreamRequestID = errordetail.RequestID(resp.Header)
+			return recovered.Data, failure
 		}
 		return nil, failure
 	}
@@ -430,10 +499,37 @@ func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Accou
 			Model string `json:"model_id"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(data, &wrapper) != nil {
-		return nil, videoError(502, "video_protocol_error", "Invalid upstream video JSON")
+	if decodeErr := json.Unmarshal(data, &wrapper); decodeErr != nil {
+		failure := videoCause(502, "video_protocol_error", "Decode upstream video JSON", decodeErr).(*videoProtocolError)
+		failure.diagnostic = errordetail.Diagnostic(resp.StatusCode, resp.Header, []byte(sanitizeLegacyErrorMessage(string(data), body, account.GetOpenAIApiKey())))
+		failure.diagnostic["body_text"] = sanitizeLegacyErrorMessage(string(data), body, account.GetOpenAIApiKey())
+		failure.diagnostic["message"] = failure.message
+		var identity struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(data, &identity) == nil && legacyTaskPattern.MatchString(identity.Data.ID) {
+			return &legacyVideoTask{ID: identity.Data.ID}, failure
+		}
+		return nil, failure
 	}
 	result, decodeErr := decodeLegacyTask(data, task, wrapper.Data.Model)
+	if decodeErr != nil && result == nil {
+		var recovered struct {
+			Code *int             `json:"code"`
+			Data *legacyVideoTask `json:"data"`
+		}
+		_ = json.Unmarshal(data, &recovered)
+		if recovered.Data != nil && legacyTaskPattern.MatchString(recovered.Data.ID) {
+			result = recovered.Data
+		}
+		if failure, ok := decodeErr.(*videoProtocolError); ok {
+			failure.diagnostic = errordetail.Diagnostic(resp.StatusCode, resp.Header, legacyErrorFields(data))
+			failure.diagnostic["message"] = failure.message
+			failure.rejected = result == nil && ((recovered.Code != nil && *recovered.Code != 0) || UpstreamBodyError(data))
+		}
+	}
 	if failure, ok := decodeErr.(*videoProtocolError); ok && failure.diagnostic != nil {
 		failure.diagnostic["upstream_status"] = resp.StatusCode
 		if id := errordetail.RequestID(resp.Header); id != "" {
@@ -446,6 +542,31 @@ func (s *OpenAIGatewayService) legacyRequest(ctx context.Context, account *Accou
 		result.UpstreamRequestID = errordetail.RequestID(resp.Header)
 	}
 	return result, decodeErr
+}
+
+func legacyErrorFields(body []byte) []byte {
+	var root map[string]any
+	if json.Unmarshal(body, &root) != nil {
+		return body
+	}
+	if metadata, ok := root["ResponseMetadata"].(map[string]any); ok {
+		if failure, ok := metadata["Error"].(map[string]any); ok {
+			if root["message"] == nil {
+				root["message"] = failure["Message"]
+			}
+			if root["code"] == nil {
+				root["code"] = failure["Code"]
+			}
+		}
+		if root["request_id"] == nil {
+			root["request_id"] = metadata["RequestId"]
+		}
+	}
+	data, err := json.Marshal(root)
+	if err != nil {
+		return body
+	}
+	return data
 }
 
 func legacyErrorMessage(data, request []byte, apiKey string) string {
@@ -491,6 +612,7 @@ func legacyTaskFailure(task *legacyVideoTask, apiKey string) map[string]any {
 		fields["message"] = fmt.Sprintf("Upstream reported status=failed without error.message (task_id=%s)", task.ID)
 	}
 	fields["source"] = "upstream"
+	fields["operation"] = "generation"
 	if task.UpstreamRequestID != "" {
 		fields["upstream_request_id"] = task.UpstreamRequestID
 	}
@@ -498,6 +620,10 @@ func legacyTaskFailure(task *legacyVideoTask, apiKey string) map[string]any {
 }
 
 func (s *OpenAIGatewayService) queryLegacyVideo(ctx context.Context, account *Account, key *APIKey, id string) (*legacyVideoTask, *VideoTaskMetadata, error) {
+	return s.observeLegacyVideo(ctx, account, key, id, false)
+}
+
+func (s *OpenAIGatewayService) observeLegacyVideo(ctx context.Context, account *Account, key *APIKey, id string, cancel bool) (*legacyVideoTask, *VideoTaskMetadata, error) {
 	meta, err := s.videoTaskMetadata(ctx, key, id)
 	if err != nil {
 		return nil, nil, videoCause(503, "video_task_metadata_unavailable", "Read video task association from Redis", err)
@@ -505,20 +631,33 @@ func (s *OpenAIGatewayService) queryLegacyVideo(ctx context.Context, account *Ac
 	if meta.AccountID != account.ID || meta.Protocol != VideoProtocolLegacy {
 		return nil, nil, videoError(502, "video_protocol_error", "Video task association mismatch")
 	}
-	task, err := s.legacyRequest(ctx, account, id, nil, "")
+	if cancel && meta.LastStatus == "cancelled" {
+		return nil, meta, nil
+	}
+	method := http.MethodGet
+	if cancel {
+		method = http.MethodPut
+	}
+	task, err := s.legacyRequestMethod(ctx, account, id, nil, "", method)
 	if err != nil {
 		return nil, nil, err
 	}
 	if task.Model != meta.UpstreamModel {
-		return nil, nil, videoError(502, "video_protocol_error", "Upstream video model mismatch")
+		return nil, nil, videoError(502, "video_protocol_error", fmt.Sprintf("Upstream video model mismatch: expected %q, received %q", meta.UpstreamModel, task.Model))
+	}
+	if cancel && task.Status != "canceled" {
+		return nil, nil, videoError(502, "video_protocol_error", "Upstream cancellation response did not confirm status=canceled")
 	}
 	status, _ := legacyStatus(task)
 	store, _ := s.videoStore()
-	status, err = store.VideoStatus(ctx, VideoTaskMetadataKey(meta.GroupID, meta.APIKeyID, id), status)
+	var failure map[string]any
+	if task.Status == "failed" {
+		failure = legacyTaskFailure(task, account.GetOpenAIApiKey())
+	}
+	meta, err = store.VideoObserve(ctx, VideoTaskMetadataKey(meta.GroupID, meta.APIKeyID, id), status, time.Now().UnixMilli(), failure)
 	if err != nil {
 		return nil, nil, videoCause(503, "video_task_metadata_unavailable", "Write video task status to Redis", err)
 	}
-	meta.LastStatus = status
 	if task.Status == "failed" {
 		failure := legacyTaskFailure(task, account.GetOpenAIApiKey())
 		slog.Warn("video_legacy.task_failed", "task_id", id, "account_id", account.ID,
@@ -531,29 +670,7 @@ func (s *OpenAIGatewayService) queryLegacyVideo(ctx context.Context, account *Ac
 func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Context, account *Account, key *APIKey, request *OpenAIVideoRequest, taskID string, content bool, mappedModel string) (result *OpenAIForwardResult, err error) {
 	defer func() {
 		if err != nil && !c.Writer.Written() {
-			var e *videoProtocolError
-			if errors.As(err, &e) {
-				fields := gin.H{"type": e.code, "code": e.code, "message": e.message, "source": "platform"}
-				switch e.code {
-				case "invalid_video_reference", "video_reference_not_found", "video_reference_expired":
-					fields["type"] = "invalid_request_error"
-					c.Header("Cache-Control", "no-store")
-				}
-				if e.diagnostic != nil {
-					for k, v := range e.diagnostic {
-						fields[k] = v
-					}
-					fields["platform_code"] = e.code
-				}
-				if id, ok := fields["upstream_request_id"].(string); ok && !strings.ContainsAny(id, "\r\n") {
-					c.Header("X-Upstream-Request-ID", id)
-				}
-				setOpsUpstreamError(c, e.status, e.message, string(mustVideoDiagnosticJSON(fields)))
-				c.JSON(e.status, gin.H{"error": fields})
-			} else {
-				setOpsUpstreamError(c, 0, errordetail.Text(err.Error()), "")
-				c.JSON(503, gin.H{"error": gin.H{"type": "video_service_error", "source": "platform", "message": errordetail.Text(err.Error())}})
-			}
+			writeVideoError(c, err)
 		}
 	}()
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/video/tasks")
@@ -561,15 +678,20 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		if content {
 			return nil, s.downloadLegacyVideo(ctx, c, account, key, taskID)
 		}
-		task, meta, e := s.queryLegacyVideo(ctx, account, key, taskID)
+		task, meta, e := s.observeLegacyVideo(ctx, account, key, taskID, c.Request.Method == http.MethodPut)
 		if e != nil {
 			return nil, e
 		}
-		output := normalizedVideoTask{Object: "video", ID: taskID, Model: meta.RequestedModel, Status: meta.LastStatus}
-		if meta.LastStatus == "failed" {
-			output.Error = legacyTaskFailure(task, account.GetOpenAIApiKey())
+		source := "upstream"
+		if task == nil {
+			source = "cached"
+		} else if observed, _ := legacyStatus(task); observed != meta.LastStatus {
+			source = "cached"
+			slog.Warn("video_legacy.status_conflict", "task_id", taskID, "recorded_status", meta.LastStatus, "upstream_status", observed)
 		}
-		c.JSON(200, output)
+		s.contractFromTask(ctx, c, key, meta, source)
+		contractFor(c).Billing = s.finishVideoBilling(ctx, key, account, meta, videoQuotaUpdater(ctx))
+		writeVideoJSON(c, 200, normalizedVideoTask{Object: "video", ID: taskID, Model: meta.RequestedModel, Status: meta.LastStatus, Error: meta.TaskError})
 		return nil, nil
 	}
 	store, e := s.videoStore()
@@ -581,14 +703,25 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 	if e != nil {
 		return nil, e
 	}
-	submission := &videoSubmission{SchemaVersion: 1, SemanticSHA256: legacyVideoSemanticHash(request.Model, upstreamModel, params, images), AccountID: account.ID, Protocol: VideoProtocolLegacy, State: "preparing", BillingRequestID: resolveUsageBillingRequestID(ctx, ""), ExpiresAt: time.Now().Unix() + 604800}
+	billing, e := s.videoBillingSnapshot(ctx, key, request)
+	if e != nil {
+		return nil, videoCause(503, "video_pricing_unavailable", "Freeze video billing quote", e)
+	}
+	requestID := contractFor(c).RequestID
+	if requestID == "" {
+		requestID = strings.TrimPrefix(resolveUsageBillingRequestID(ctx, ""), "client:")
+		contractFor(c).RequestID = requestID
+	}
+	submission := &videoSubmission{SchemaVersion: 1, SemanticSHA256: legacyVideoSemanticHash(request.Model, upstreamModel, params, images), AccountID: account.ID, Protocol: VideoProtocolLegacy, State: "preparing", BillingRequestID: "client:" + requestID, ExpiresAt: time.Now().Unix() + 604800, RequestID: requestID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), UpstreamModel: upstreamModel, Billing: billing}
 	idem := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if idem == "" {
+		idem = requestID
+	}
 	submissionKey := ""
 	upstreamIdem := ""
-	var reservation []byte
 	dispatched := false
 	if idem != "" {
-		if len(idem) > 255 {
+		if len(idem) > 255 && c.GetHeader("Idempotency-Key") != "" {
 			return nil, videoError(400, "invalid_request_error", "Idempotency-Key is too long")
 		}
 		digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s", derefGroupID(key.GroupID), key.ID, idem)))
@@ -600,39 +733,9 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 			return nil, videoError(503, "video_submission_unavailable", "Create video submission in Redis: "+e.Error())
 		}
 		if !created {
-			encoded, e = store.VideoLoad(ctx, submissionKey)
-			if e != nil {
-				return nil, videoError(503, "video_submission_unavailable", "Read video submission from Redis: "+e.Error())
-			}
-			var previous videoSubmission
-			if json.Unmarshal(encoded, &previous) != nil || previous.SchemaVersion != 1 {
-				return nil, videoError(503, "video_submission_unavailable", "Submission record is invalid")
-			}
-			if previous.SemanticSHA256 != submission.SemanticSHA256 {
-				return nil, videoError(409, "idempotency_conflict", "Idempotency-Key was used with different parameters")
-			}
-			if previous.Task == nil || previous.State != "accepted" {
-				return nil, videoError(409, "submission_unknown", "Original video submission is pending confirmation")
-			}
-			if e = store.VideoBind(ctx, previous.Task); e != nil {
-				return nil, videoError(503, "video_submission_unavailable", "Restore video task binding in Redis: "+e.Error())
-			}
-			if strings.HasPrefix(previous.BillingRequestID, "client:") {
-				c.Header("X-Client-Request-ID", strings.TrimPrefix(previous.BillingRequestID, "client:"))
-			}
-			c.JSON(202, normalizedVideoTask{Object: "video", ID: previous.Task.TaskID, Model: previous.Task.RequestedModel, Status: previous.Task.LastStatus})
-			return nil, nil
+			_, e := s.ReplayVideoCreate(ctx, c, key, request)
+			return nil, e
 		}
-		reservation = encoded
-		defer func() {
-			if !dispatched {
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-				defer cancel()
-				if e := store.VideoDeleteIfEqual(cleanupCtx, submissionKey, reservation); e != nil {
-					slog.Warn("video_legacy.reservation_cleanup_failed", "billing_request_id", submission.BillingRequestID, "reason", e.Error())
-				}
-			}
-		}()
 	}
 	saveSubmission := func() error {
 		if submissionKey == "" {
@@ -650,6 +753,48 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		}
 		return nil
 	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if !dispatched {
+			submission.State = "not_submitted"
+		}
+		var failure *videoProtocolError
+		if errors.As(err, &failure) {
+			submission.Failure = failure
+		} else {
+			submission.Failure = &videoProtocolError{status: 503, code: "video_service_error", message: safeVideoError(err)}
+		}
+		if saveErr := saveSubmission(); saveErr != nil {
+			slog.Warn("video_legacy.submission_result_store_failed", "request_id", requestID, "reason", safeVideoError(saveErr))
+		}
+		v := contractFor(c)
+		v.RequestID = requestID
+		v.SubmissionStatus = submission.State
+		v.SubmissionRetry = submission.Retry
+		if videoSubmissionClosed(submission) {
+			v.Billing = s.closedVideoSubmissionBilling(ctx, key, submission)
+		} else {
+			v.Billing = s.VideoRequestBillingStatus(ctx, key, requestID)
+		}
+	}()
+	index := videoRequestIndexKey(key, requestID)
+	if ok, indexErr := store.VideoSave(ctx, index, []byte(submissionKey), time.Unix(submission.ExpiresAt, 0), true); indexErr != nil {
+		return nil, videoCause(503, "video_submission_unavailable", "Save video request index", indexErr)
+	} else if !ok {
+		previous, indexErr := store.VideoLoad(ctx, index)
+		if indexErr != nil {
+			return nil, indexErr
+		}
+		if string(previous) != submissionKey {
+			return nil, videoError(409, "idempotency_conflict", "Request ID is already associated with another video submission")
+		}
+	}
+	if e = s.registerVideoBilling(ctx, submission); e != nil {
+		return nil, videoCause(503, "video_billing_unavailable", "Register video billing outcome", e)
+	}
+	submission.BillingRegistered = billing != nil && (s.cfg == nil || s.cfg.RunMode != "simple")
 	if request.UsesUploadedVideoReference() {
 		items, assets, err := s.resolveVideoReferenceFiles(ctx, key, request.legacyReferences)
 		if err != nil {
@@ -690,26 +835,58 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		return nil, videoError(413, "invalid_request_error", fmt.Sprintf("Legacy video JSON size %d bytes exceeds limit 65536 bytes", len(body)))
 	}
 	submission.State = "dispatching"
+	submission.Retry = &VideoSubmissionRetry{MaxAttempts: videoSubmissionMaxAttempts}
+	submission.DispatchDeadline = time.Now().Add(videoSubmissionTimeout + 10*time.Second).Unix()
 	if e = saveSubmission(); e != nil {
 		submission.State = "preparing"
 		return nil, videoError(503, "video_submission_unavailable", "Mark video submission as dispatching in Redis: "+e.Error())
 	}
-	started := time.Now()
 	dispatched = true
-	task, e := s.legacyRequest(ctx, account, "", body, upstreamIdem)
+	task, e := s.createLegacyVideoWithRetry(ctx, account, body, upstreamIdem, submission, saveSubmission)
+	contractFor(c).SubmissionRetry = submission.Retry
 	if e != nil {
-		submission.State = "unknown"
+		submission.State = "failed"
+		var failure *videoProtocolError
+		if errors.As(e, &failure) && failure.rejected && !submission.Retry.Exhausted {
+			submission.State = "rejected"
+		}
+		if failure != nil && failure.notDispatched {
+			submission.State = "not_submitted"
+		}
+		if task != nil && legacyTaskPattern.MatchString(task.ID) {
+			if failure == nil || (!failure.rejected && !failure.notDispatched) {
+				submission.State = "protocol_error"
+			}
+			now := time.Now().Unix()
+			submission.Task = &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, BillingRequestID: submission.BillingRequestID, RequestID: requestID, SubmissionKey: submissionKey, BoundAt: now, ExpiresAt: submission.ExpiresAt, Billing: billing}
+			submission.Task.SubmissionRetry = submission.Retry
+			submission.Task.SubmissionStatus = submission.State
+			_ = store.VideoBind(context.WithoutCancel(ctx), submission.Task)
+			id := task.ID
+			contractFor(c).TaskID = &id
+		}
 		_ = saveSubmission()
 		return nil, e
 	}
 	if task.Model != upstreamModel {
-		submission.State = "unknown"
+		submission.State = "protocol_error"
+		now := time.Now().Unix()
+		submission.Task = &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, BillingRequestID: submission.BillingRequestID, RequestID: requestID, SubmissionKey: submissionKey, BoundAt: now, ExpiresAt: submission.ExpiresAt, Billing: billing}
+		submission.Task.SubmissionRetry = submission.Retry
+		submission.Task.SubmissionStatus = submission.State
+		_ = store.VideoBind(context.WithoutCancel(ctx), submission.Task)
+		id := task.ID
+		contractFor(c).TaskID = &id
 		_ = saveSubmission()
-		return nil, videoError(502, "video_protocol_error", "Upstream video model mismatch")
+		return nil, videoError(502, "video_protocol_error", fmt.Sprintf("Upstream video model mismatch: expected %q, received %q", upstreamModel, task.Model))
 	}
 	status, _ := legacyStatus(task)
 	now := time.Now().Unix()
-	meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, ReferenceAssetID: submission.ReferenceAssetID, ReferenceAssetIDs: submission.ReferenceAssetIDs, BillingRequestID: submission.BillingRequestID, LastStatus: status, BoundAt: now, ExpiresAt: now + 604800}
+	meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: task.ID, APIKeyID: key.ID, GroupID: derefGroupID(key.GroupID), AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: request.Model, UpstreamModel: upstreamModel, ReferenceAssetID: submission.ReferenceAssetID, ReferenceAssetIDs: submission.ReferenceAssetIDs, BillingRequestID: submission.BillingRequestID, LastStatus: status, BoundAt: now, ExpiresAt: submission.ExpiresAt, RequestID: requestID, SubmissionKey: submissionKey, ObservedAt: time.Now().UnixMilli(), Billing: billing}
+	meta.SubmissionRetry = submission.Retry
+	if status == "failed" {
+		meta.TaskError = legacyTaskFailure(task, account.GetOpenAIApiKey())
+	}
 	submission.Task = meta
 	submission.State = "accepted"
 	bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -731,6 +908,8 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 			slog.Warn("video_legacy.reference_task_update_failed", "task_id", task.ID, "asset_id", asset, "reason", e.Error())
 		}
 	}
-	c.JSON(202, normalizedVideoTask{Object: "video", ID: task.ID, Model: request.Model, Status: status})
-	return &OpenAIForwardResult{ResponseID: task.ID, Model: request.Model, BillingModel: upstreamModel, UpstreamModel: upstreamModel, VideoCount: 1, VideoResolution: request.Resolution, VideoDurationSeconds: request.Seconds, Duration: time.Since(started)}, nil
+	s.contractFromTask(bindCtx, c, key, meta, "upstream")
+	contractFor(c).Billing = s.finishVideoBilling(bindCtx, key, account, meta, videoQuotaUpdater(ctx))
+	writeVideoJSON(c, 202, normalizedVideoTask{Object: "video", ID: task.ID, Model: request.Model, Status: status, Error: meta.TaskError})
+	return nil, nil
 }

@@ -523,13 +523,12 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 
 // ProvideImageTaskService 构造异步图片任务服务。
 //
-// 对象存储是异步图片任务的启用前提：仅当 image_storage 开关打开且凭证齐全时，
-// 服务才启用，并挂上把结果转存到对象存储的 uploader；否则功能整体禁用
-// （handler 返回 404，不创建任务、不写 Redis），从而避免大 base64 结果撑爆 Redis。
+// The background synchronous adapter requires object storage. The Naoshengyun
+// provider adapter uses this Redis store without enabling the background adapter.
 func ProvideImageTaskService(store ImageTaskStore, storage ImageStorage, cfg *config.Config) *ImageTaskService {
 	if !cfg.ImageStorage.Active() {
 		if cfg.ImageStorage.Enabled {
-			logger.L().Warn("image_storage.enabled is true but object storage is not fully configured; async image tasks are disabled")
+			logger.L().Warn("image_storage credentials are incomplete; background synchronous image tasks are disabled")
 		}
 		return NewImageTaskService(store)
 	}

@@ -132,7 +132,7 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, response)
+	service.WriteMediaJSON(c, http.StatusOK, response)
 }
 
 type videoRequestUsageResponse struct {
@@ -186,10 +186,7 @@ func (h *OpenAIGatewayHandler) prepareVideoBilling(c *gin.Context, key *service.
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Video-Dispatch", "rejected")
-	c.JSON(http.StatusConflict, gin.H{"error": gin.H{
-		"type": "invalid_request_error", "code": code, "source": "platform",
-		"message": message,
-	}})
+	service.WriteVideoError(c, http.StatusConflict, code, message)
 	return nil, false
 }
 
@@ -204,12 +201,40 @@ func (h *GatewayHandler) RequestVideoUsage(c *gin.Context) {
 		return
 	}
 	id := ids[0]
+	outcome, outcomeErr := h.openAIGatewayService.VideoRequestOutcome(c.Request.Context(), key, id)
+	if outcomeErr != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "video_billing_unavailable", localDiagnosticMessage("Read video billing outcome", outcomeErr, ""))
+		return
+	}
+	if outcome != nil {
+		var count *int
+		if outcome.Status == "settled" {
+			value := 1
+			count = &value
+		} else if outcome.Status == "not_charged" {
+			value := 0
+			count = &value
+		}
+		response := videoRequestUsageResponse{Object: "sub2api.video_request_usage", SchemaVersion: 2, Currency: "USD", RequestID: id, Status: outcome.Status, ActualCostUSD: outcome.ActualCostUSD, VideoCount: count}
+		if validVideoBillingModel(outcome.Model) {
+			response.Model = &outcome.Model
+		}
+		if outcome.Seconds > 0 && outcome.Seconds <= 600 {
+			response.DurationSeconds = &outcome.Seconds
+		}
+		if service.ValidVideoBillingResolution(outcome.Resolution) {
+			response.Resolution = &outcome.Resolution
+		}
+		c.Header("Cache-Control", "no-store")
+		service.WriteMediaJSON(c, 200, response)
+		return
+	}
 	evidence, err := h.openAIGatewayService.RequestVideoBilling(c.Request.Context(), key, id)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read video request billing", err, ""))
 		return
 	}
-	response := videoRequestUsageResponse{Object: "sub2api.video_request_usage", SchemaVersion: 1, Currency: "USD", RequestID: id, Status: "pending"}
+	response := videoRequestUsageResponse{Object: "sub2api.video_request_usage", SchemaVersion: 2, Currency: "USD", RequestID: id, Status: "unknown"}
 	if evidence != nil {
 		// Preserve the strict nullable SEP wire shape even for incomplete or
 		// malformed legacy metadata; invalid evidence never confirms a charge.
@@ -229,8 +254,23 @@ func (h *GatewayHandler) RequestVideoUsage(c *gin.Context) {
 			response.Status, response.ActualCostUSD = "settled", evidence.ActualCostUSD
 		}
 	}
+	if evidence == nil {
+		receipt, err := h.openAIGatewayService.MediaFailure(c.Request.Context(), key, "video", id)
+		if err != nil {
+			h.errorResponse(c, 503, "video_receipt_unavailable", localDiagnosticMessage("Read saved video failure", err, ""))
+			return
+		}
+		if receipt != nil {
+			receipt["operation"] = "usage"
+			receipt["object"], receipt["currency"] = "sub2api.video_request_usage", "USD"
+			receipt["status"], receipt["actual_cost_usd"] = "not_charged", "0"
+			receipt["error"], receipt["operation_error"] = nil, nil
+			service.WriteMediaJSON(c, 200, receipt)
+			return
+		}
+	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, response)
+	service.WriteMediaJSON(c, http.StatusOK, response)
 }
 
 func reliableVideoBillingEvidence(evidence *service.VideoRequestBillingEvidence) bool {

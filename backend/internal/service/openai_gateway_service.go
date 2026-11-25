@@ -440,6 +440,10 @@ type OpenAIGatewayService struct {
 	videoUploadOnce                     sync.Once
 	videoUploads                        chan struct{}
 	videoDownloadTransport              http.RoundTripper
+	videoSubmissionRetryWait            func(context.Context, time.Duration) error
+	asyncImageDownloadTransport         http.RoundTripper
+	asyncImageDownloadOnce              sync.Once
+	asyncImageDownloads                 chan struct{}
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

@@ -13,6 +13,7 @@ import (
 
 // ImageBillingQuote describes sub2api's customer charge, not its supplier cost.
 type ImageBillingQuote struct {
+	cost             *CostBreakdown
 	Mode             BillingMode
 	Source           string
 	PricingAuthority string
@@ -71,6 +72,8 @@ func (s *OpenAIGatewayService) QuoteImageBilling(ctx context.Context, key *APIKe
 			validImageBillingAmount(cost.TotalCost) && validImageBillingAmount(cost.ActualCost) && validImageBillingAmount(imageMultiplier) {
 			amount := BillingUSDString(cost.ActualCost)
 			quote.Amount = &amount
+			copy := *cost
+			quote.cost = &copy
 			quote.PricingAuthority = PricingAuthoritySub2APICustomerBilling
 		}
 	}

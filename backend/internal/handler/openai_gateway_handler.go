@@ -2258,7 +2258,11 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareError(c *gin.Context, status 
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
 			// SSE 错误事件固定 schema，使用 Quote 直拼可避免额外 Marshal 分配。
-			eventBody, _ := json.Marshal(gin.H{"error": fields})
+			payload := map[string]any{"error": map[string]any(fields)}
+			if kind, _ := service.MediaEndpoint(c); kind != "" {
+				payload = service.CompleteMediaReceipt(c, status, payload)
+			}
+			eventBody, _ := json.Marshal(payload)
 			errorEvent := "event: error\ndata: " + string(eventBody) + "\n\n"
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
@@ -2387,6 +2391,10 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 
 // errorResponse returns OpenAI API format error response
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
+	if service.HasVideoContract(c) {
+		service.WriteVideoError(c, status, errType, message)
+		return
+	}
 	// body-signal compact 心跳可能已把响应头提交为 200：JSON 错误体会与已
 	// 提交的 SSE 流交错，必须降级为 response.failed 终止事件（#3887）。
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
@@ -2395,7 +2403,7 @@ func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType
 			return
 		}
 	}
-	c.JSON(status, gin.H{"error": service.GatewayErrorFields(c, errType, message)})
+	service.WriteMediaJSON(c, status, gin.H{"error": service.GatewayErrorFields(c, errType, message)})
 }
 
 // openAICompactKeepaliveInterval 复用流式 keepalive 配置作为 compact 下游

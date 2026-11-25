@@ -136,6 +136,9 @@ func (s *OpenAIGatewayService) downloadLegacyVideo(ctx context.Context, c *gin.C
 		if err != nil {
 			return err
 		}
+		s.contractFromTask(ctx, c, key, meta, "upstream")
+		contractFor(c).Billing = s.finishVideoBilling(ctx, key, account, meta, videoQuotaUpdater(ctx))
+		c.Header("X-Video-Billing-Status", contractFor(c).Billing.Status)
 		if task.Status != "succeeded" || meta.LastStatus != "completed" {
 			if task.Status == "failed" {
 				failure := legacyTaskFailure(task, account.GetOpenAIApiKey())

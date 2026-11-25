@@ -77,6 +77,16 @@ func (v *videoMemoryStore) VideoDeleteIfEqual(_ context.Context, key string, b [
 	}
 	return nil
 }
+
+func (v *videoMemoryStore) VideoReplaceIfEqual(_ context.Context, key string, previous, data []byte) (bool, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if !bytes.Equal(v.records[key], previous) {
+		return false, nil
+	}
+	v.records[key] = append([]byte(nil), data...)
+	return true, nil
+}
 func (v *videoMemoryStore) VideoBind(ctx context.Context, m *VideoTaskMetadata) error {
 	b, _ := json.Marshal(m)
 	_, err := v.VideoSave(ctx, VideoTaskMetadataKey(m.GroupID, m.APIKeyID, m.TaskID), b, time.Unix(m.ExpiresAt, 0), true)
@@ -99,6 +109,34 @@ func (v *videoMemoryStore) VideoStatus(ctx context.Context, key, status string) 
 	b, _ = json.Marshal(m)
 	_, e = v.VideoReplace(ctx, key, b)
 	return status, e
+}
+
+func (v *videoMemoryStore) VideoObserve(_ context.Context, key, status string, observed int64, failure map[string]any) (*VideoTaskMetadata, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	b, ok := v.records[key]
+	if !ok {
+		return nil, redis.Nil
+	}
+	var m VideoTaskMetadata
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	if m.LastStatus == status && (status == "completed" || status == "failed" || status == "cancelled") && m.ObservedAt <= observed {
+		m.ObservedAt = observed
+		if failure != nil {
+			m.TaskError = failure
+		}
+		v.records[key], _ = json.Marshal(m)
+		return &m, nil
+	}
+	if m.LastStatus != "completed" && m.LastStatus != "failed" && m.LastStatus != "cancelled" && m.ObservedAt <= observed && !(m.LastStatus == "in_progress" && status == "queued") {
+		m.LastStatus = status
+		m.ObservedAt = observed
+		m.TaskError = failure
+		v.records[key], _ = json.Marshal(m)
+	}
+	return &m, nil
 }
 func (v *videoMemoryStore) VideoSaveReference(_ context.Context, r *VideoReference) error {
 	v.mu.Lock()
@@ -141,7 +179,11 @@ func legacyTestAccount() *Account {
 }
 func legacyTestResponse(status int, model, taskStatus, videoURL string) *http.Response {
 	final := taskStatus == "succeeded" || taskStatus == "failed" || taskStatus == "canceled"
-	data, _ := json.Marshal(map[string]any{"code": 0, "message": "accepted", "data": map[string]any{"id": legacyTestTaskID, "model_id": model, "status": taskStatus, "is_final": final, "created_at": 12345, "video_url": videoURL}})
+	message := "success"
+	if status == 202 {
+		message = "accepted"
+	}
+	data, _ := json.Marshal(map[string]any{"code": 0, "message": message, "data": map[string]any{"id": legacyTestTaskID, "model_id": model, "status": taskStatus, "is_final": final, "created_at": 12345, "video_url": videoURL}})
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(data))}
 }
 func legacyTestPNG(t *testing.T) []byte {
@@ -185,12 +227,13 @@ func TestLegacyVideoCreateReplayAndQuery(t *testing.T) {
 		result, e := svc.ForwardVideo(c.Request.Context(), c, account, key, req, "", false, "seedance-2.0")
 		require.NoError(t, e)
 		require.Equal(t, 202, w.Code)
-		require.JSONEq(t, `{"object":"video","id":"`+legacyTestTaskID+`","model":"alias","status":"queued"}`, w.Body.String())
-		if attempt == 0 {
-			require.NotNil(t, result)
-			require.Equal(t, 4, result.VideoDurationSeconds)
-		} else {
-			require.Nil(t, result)
+		var output normalizedVideoTask
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &output))
+		require.Equal(t, legacyTestTaskID, output.ID)
+		require.Equal(t, "queued", output.Status)
+		require.Equal(t, "accepted", output.SubmissionStatus)
+		require.Nil(t, result, "creation must not trigger the handler's immediate charging path")
+		if attempt != 0 {
 			require.Equal(t, "attempt-0", w.Header().Get("X-Client-Request-ID"))
 		}
 	}
@@ -550,11 +593,12 @@ func TestLegacyTaskStatesAndIdentity(t *testing.T) {
 	}
 }
 
-func TestLegacyAmbiguousSubmissionIsNotResubmitted(t *testing.T) {
+func TestLegacyAmbiguousSubmissionRetriesOnceSequenceOnly(t *testing.T) {
 	cfg := legacyTestConfig(t)
 	store := newVideoMemoryStore()
 	calls := 0
 	svc := &OpenAIGatewayService{cfg: cfg, cache: store, httpUpstream: videoTestUpstream{do: func(r *http.Request) (*http.Response, error) { calls++; return nil, context.DeadlineExceeded }}}
+	svc.videoSubmissionRetryWait = func(context.Context, time.Duration) error { return nil }
 	body := []byte(`{"model":"seedance-2.0","prompt":"waves","seconds":4,"resolution":"720p"}`)
 	for attempt := 0; attempt < 2; attempt++ {
 		request, e := ParseOpenAIVideoRequest(body, "application/json")
@@ -565,7 +609,7 @@ func TestLegacyAmbiguousSubmissionIsNotResubmitted(t *testing.T) {
 		_, e = svc.ForwardVideo(context.Background(), c, legacyTestAccount(), &APIKey{ID: 8}, request, "", false, "")
 		require.Error(t, e)
 	}
-	require.Equal(t, 1, calls)
+	require.Equal(t, videoSubmissionMaxAttempts, calls)
 }
 
 func TestLegacyConcurrentAndConflictingSubmissionsDoNotDispatch(t *testing.T) {
@@ -592,7 +636,7 @@ func TestLegacyConcurrentAndConflictingSubmissionsDoNotDispatch(t *testing.T) {
 	go func() { finished <- invoke("waves") }()
 	<-entered
 	err := invoke("waves")
-	require.EqualError(t, err, "Original video submission is pending confirmation")
+	require.EqualError(t, err, "Original video submission is still in progress; query its original request ID")
 	err = invoke("different prompt")
 	require.EqualError(t, err, "Idempotency-Key was used with different parameters")
 	close(release)
@@ -687,7 +731,7 @@ func TestLegacyVideoFailureDetailsReachQueryDownloadAndLogs(t *testing.T) {
 				account, key := legacyTestAccount(), &APIKey{ID: 8}
 				now := time.Now().Unix()
 				require.NoError(t, store.VideoBind(context.Background(), &VideoTaskMetadata{SchemaVersion: 1, TaskID: legacyTestTaskID, APIKeyID: key.ID, AccountID: account.ID, Protocol: VideoProtocolLegacy, RequestedModel: "alias", UpstreamModel: "seedance-2.0", BillingRequestID: "billing-test", BoundAt: now, ExpiresAt: now + 604800}))
-				body, err := json.Marshal(map[string]any{"code": 0, "data": map[string]any{"id": legacyTestTaskID, "model_id": "seedance-2.0", "status": "failed", "is_final": true, "created_at": 12345, "error": test.upstreamError}})
+				body, err := json.Marshal(map[string]any{"code": 0, "message": "success", "data": map[string]any{"id": legacyTestTaskID, "model_id": "seedance-2.0", "status": "failed", "is_final": true, "created_at": 12345, "error": test.upstreamError}})
 				require.NoError(t, err)
 				svc := &OpenAIGatewayService{cfg: legacyTestConfig(t), cache: store, httpUpstream: videoTestUpstream{do: func(r *http.Request) (*http.Response, error) {
 					require.Equal(t, http.MethodGet, r.Method)

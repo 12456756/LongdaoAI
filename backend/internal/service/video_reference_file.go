@@ -43,9 +43,13 @@ func videoReferenceTooLarge() error {
 	return videoError(413, "video_reference_too_large", "Reference video exceeds 90 MiB or the multipart request exceeds its size limit.")
 }
 
-func referenceStorageError(err error) error {
-	slog.Warn("video_reference.file_storage_error", "error", err)
-	return videoError(503, "video_reference_storage_error", "Reference video storage is temporarily unavailable.")
+func referenceStorageError(stage string, err error) error {
+	slog.Warn("video_reference.file_storage_error", "stage", stage, "error", safeVideoError(err))
+	var failure *videoProtocolError
+	if errors.As(err, &failure) {
+		return err
+	}
+	return videoCause(503, "video_reference_storage_error", stage, err)
 }
 
 func (s *OpenAIGatewayService) SaveVideoReferenceUpload(ctx context.Context, key *APIKey, reader *multipart.Reader) (*VideoReference, error) {
@@ -55,7 +59,7 @@ func (s *OpenAIGatewayService) SaveVideoReferenceUpload(ctx context.Context, key
 	}
 	file, err := os.CreateTemp("", "longdao-video-reference-*")
 	if err != nil {
-		return nil, referenceStorageError(err)
+		return nil, referenceStorageError("Create reference video upload spool", err)
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
@@ -69,7 +73,7 @@ func (s *OpenAIGatewayService) SaveVideoReferenceUpload(ctx context.Context, key
 	if err != nil {
 		var diskError *os.PathError
 		if errors.As(err, &diskError) {
-			return nil, referenceStorageError(err)
+			return nil, referenceStorageError("Write reference video upload spool", err)
 		}
 		return nil, referenceUploadReadError(err)
 	}
@@ -80,27 +84,27 @@ func (s *OpenAIGatewayService) SaveVideoReferenceUpload(ctx context.Context, key
 	if err != nil {
 		var diskError *os.PathError
 		if errors.As(err, &diskError) {
-			return nil, referenceStorageError(err)
+			return nil, referenceStorageError("Read reference video container", err)
 		}
 		return nil, videoError(415, "unsupported_video_reference_format", "Reference file must be a readable MP4 or MOV with a video track.")
 	}
 
 	r, err := s.videoReferences()
 	if err != nil {
-		return nil, referenceStorageError(err)
+		return nil, referenceStorageError("Initialize reference video storage", err)
 	}
 	unlock, err := videoDiskLock(ctx, r.cfg.ReferenceDir)
 	if err != nil {
-		return nil, referenceStorageError(err)
+		return nil, referenceStorageError("Lock reference video storage", err)
 	}
 	defer unlock()
 	if err = r.checkReferenceCapacity(ctx, size+4096); err != nil {
-		return nil, referenceStorageError(err)
+		return nil, referenceStorageError("Check reference video storage capacity", err)
 	}
 	input := videoReferenceInput{path: file.Name(), size: size, sha256: hex.EncodeToString(hash.Sum(nil)), extension: extension, mimeType: videoFileMimeType(extension)}
 	ref, err := r.saveReferenceFile(ctx, key, input, r.now().UTC(), true)
 	if err != nil {
-		return nil, referenceStorageError(err)
+		return nil, referenceStorageError("Save reference video file and metadata", err)
 	}
 	return ref, nil
 }
@@ -209,12 +213,12 @@ func (s *OpenAIGatewayService) resolveVideoReferenceFiles(ctx context.Context, k
 		}
 		r, err := s.videoReferences()
 		if err != nil {
-			return nil, nil, referenceStorageError(err)
+			return nil, nil, referenceStorageError("Initialize reference video storage", err)
 		}
 		id := item.VideoURL.ReferenceID
 		ref, err := r.store.VideoLoadReference(ctx, id)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			return nil, nil, referenceStorageError(err)
+			return nil, nil, referenceStorageError("Read reference video metadata", err)
 		}
 		if ref == nil || ref.APIKeyID != key.ID || ref.GroupID != derefGroupID(key.GroupID) {
 			return nil, nil, videoError(404, "video_reference_not_found", "Reference video was not found.")
@@ -225,7 +229,7 @@ func (s *OpenAIGatewayService) resolveVideoReferenceFiles(ctx context.Context, k
 		}
 		extension := filepath.Ext(ref.RelativePath)
 		if ref.AssetID != id || ref.SchemaVersion != 1 || ref.ReadUntil <= ref.ExpiresAt || videoFileMimeType(extension) == "" || videoFileMimeType(extension) != ref.MimeType {
-			return nil, nil, referenceStorageError(fmt.Errorf("invalid saved video reference metadata for %s", id))
+			return nil, nil, referenceStorageError("Validate reference video metadata", fmt.Errorf("invalid saved video reference metadata for %s", id))
 		}
 		expires := min(ref.ReadUntil, now+int64(openAIVideoTaskTTL/time.Second))
 		resolved[i].VideoURL = &videoContentURL{URL: r.signedReferenceURL(id, extension, expires)}

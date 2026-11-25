@@ -8,6 +8,7 @@ import (
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
 	"github.com/gin-gonic/gin"
 )
 
@@ -47,7 +48,7 @@ func (h *OpenAIGatewayHandler) UploadVideoReference(c *gin.Context) {
 	release, err := h.gatewayService.AcquireVideoUpload(c.Request.Context())
 	if err != nil {
 		c.Header("Retry-After", "1")
-		writeVideoReferenceError(c, http.StatusTooManyRequests, "rate_limit_error", "Video uploads are busy. Try again shortly.")
+		writeVideoReferenceError(c, http.StatusTooManyRequests, "rate_limit_error", "Acquire reference video upload slot: "+errordetail.Text(err.Error()))
 		return
 	}
 	defer release()
@@ -58,7 +59,7 @@ func (h *OpenAIGatewayHandler) UploadVideoReference(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, gin.H{
+	service.WriteMediaJSON(c, http.StatusCreated, gin.H{
 		"reference_id": ref.AssetID,
 		"content_type": ref.MimeType,
 		"size_bytes":   ref.ByteLength,
@@ -74,5 +75,5 @@ func writeVideoReferenceError(c *gin.Context, status int, code, message string) 
 		errorType = "rate_limit_error"
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(status, gin.H{"error": gin.H{"type": errorType, "code": code, "message": message, "source": "platform"}})
+	service.WriteMediaJSON(c, status, gin.H{"error": gin.H{"type": errorType, "code": code, "message": errordetail.Text(message), "source": "platform"}})
 }

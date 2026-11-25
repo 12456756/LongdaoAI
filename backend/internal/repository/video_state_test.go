@@ -55,3 +55,50 @@ func TestVideoStateFixedExpiryAndTerminalStatus(t *testing.T) {
 	require.NoError(t, e)
 	require.False(t, ok)
 }
+
+func TestVideoStateCompareUpdateCannotOverwriteAcceptedReceipt(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := &gatewayCache{rdb: client}
+	ctx := context.Background()
+	key := "video:submission:cas-test"
+	previous, accepted, failed := []byte(`{"state":"dispatching"}`), []byte(`{"state":"accepted"}`), []byte(`{"state":"failed"}`)
+	_, err := store.VideoSave(ctx, key, previous, time.Now().Add(time.Hour), true)
+	require.NoError(t, err)
+	ttl := server.TTL(key)
+	updated, err := store.VideoReplaceIfEqual(ctx, key, previous, accepted)
+	require.NoError(t, err)
+	require.True(t, updated)
+	updated, err = store.VideoReplaceIfEqual(ctx, key, previous, failed)
+	require.NoError(t, err)
+	require.False(t, updated)
+	current, err := store.VideoLoad(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, accepted, current)
+	require.Equal(t, ttl, server.TTL(key))
+	updated, err = store.VideoReplaceIfEqual(ctx, "video:submission:absent", previous, failed)
+	require.NoError(t, err)
+	require.False(t, updated)
+}
+
+func TestVideoObservationPreservesFailureAndExpiry(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := &gatewayCache{rdb: client}
+	ctx := context.Background()
+	meta := &service.VideoTaskMetadata{SchemaVersion: 1, TaskID: "task", APIKeyID: 4, GroupID: 3, LastStatus: "queued", ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix()}
+	require.NoError(t, store.VideoBind(ctx, meta))
+	key := service.VideoTaskMetadataKey(3, 4, "task")
+	ttl := server.TTL(key)
+	failure := map[string]any{"code": "invalid_reference", "message": "Reference image rejected"}
+	observed, err := store.VideoObserve(ctx, key, "failed", 12345, failure)
+	require.NoError(t, err)
+	require.Equal(t, failure, observed.TaskError)
+	observed, err = store.VideoObserve(ctx, key, "completed", 12346, nil)
+	require.NoError(t, err)
+	require.Equal(t, "failed", observed.LastStatus)
+	require.Equal(t, failure, observed.TaskError)
+	require.Equal(t, ttl, server.TTL(key))
+}

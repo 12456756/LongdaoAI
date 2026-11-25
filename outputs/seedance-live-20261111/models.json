@@ -1,0 +1,35 @@
+{
+  "checked_at": "2026-11-11T07:23:23.534710+00:00",
+  "url": "https://ai.longdaoec.com/v1/models",
+  "status": 200,
+  "request_id": "eea93d27-6274-4d80-9e5a-f13e59dcf73a",
+  "response": {
+    "data": [
+      {
+        "id": "seedance-2.0",
+        "type": "model",
+        "display_name": "seedance-2.0",
+        "created_at": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "seedance-2.0-fast",
+        "type": "model",
+        "display_name": "seedance-2.0-fast",
+        "created_at": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "seedance-2.0-mini",
+        "type": "model",
+        "display_name": "seedance-2.0-mini",
+        "created_at": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "seedance-2.5",
+        "type": "model",
+        "display_name": "seedance-2.5",
+        "created_at": "2024-01-01T00:00:00Z"
+      }
+    ],
+    "object": "list"
+  }
+}

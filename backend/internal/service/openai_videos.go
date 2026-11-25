@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/errordetail"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
@@ -301,6 +303,9 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if protocol != VideoProtocolOpenAI {
 		return nil, errors.New("unsupported video protocol")
 	}
+	if c.Request.Method == http.MethodPut {
+		return nil, videoError(422, "unsupported_video_operation", "Video cancellation is only implemented for the naoshengyun_legacy protocol")
+	}
 	if request != nil && request.UsesUploadedVideoReference() {
 		return nil, videoError(400, "invalid_video_reference", "Uploaded reference videos require a Seedance account using the Naoshengyun legacy protocol.")
 	}
@@ -334,6 +339,9 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	// Preserve download variants and range requests, but never forward client auth.
 	query := upstreamReq.URL.Query()
 	for key, values := range c.Request.URL.Query() {
+		if key == "id_type" {
+			continue
+		}
 		query[key] = values
 	}
 	upstreamReq.URL.RawQuery = query.Encode()
@@ -365,6 +373,12 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if account.Proxy != nil {
 		proxy = account.Proxy.URL()
 	}
+	if request != nil {
+		contractFor(c).SubmissionStatus = "failed"
+		zero := "0"
+		contractFor(c).Billing = VideoBillingStatus{Status: "not_charged", ActualCostUSD: &zero}
+	}
+	MarkMediaDispatched(c)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(start).Milliseconds())
 	if err != nil {
@@ -375,7 +389,7 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	// These are relay-owned billing/correlation signals, even when operators
 	// allow additional upstream headers. Never let a provider forge rejection.
 	for name := range resp.Header {
-		if strings.EqualFold(name, "X-Video-Dispatch") || strings.EqualFold(name, "X-Client-Request-ID") {
+		if strings.EqualFold(name, "X-Video-Dispatch") || strings.EqualFold(name, "X-Client-Request-ID") || strings.EqualFold(name, "X-Video-Request-ID") || strings.EqualFold(name, "X-Video-Billing-Status") {
 			delete(resp.Header, name)
 		}
 	}
@@ -385,7 +399,11 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 		CaptureUpstreamError(c, resp.StatusCode, resp.Header, responseBody)
 		setOpsUpstreamError(c, resp.StatusCode, extractUpstreamErrorMessage(responseBody), string(responseBody))
 		UseUpstreamError(c)
-		writeOpenAIEmbeddingsUpstreamResponse(c, resp, errordetail.Body(responseBody), s.responseHeaderFilter)
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		if request != nil {
+			contractFor(c).SubmissionStatus = "rejected"
+		}
+		WriteVideoFailure(c, &videoProtocolError{status: resp.StatusCode, code: "video_upstream_error", message: errordetail.Message(responseBody), diagnostic: map[string]any(GatewayErrorFields(c, "video_upstream_error", errordetail.Message(responseBody)))})
 		return nil, fmt.Errorf("video upstream returned status %d", resp.StatusCode)
 	}
 	if content {
@@ -423,6 +441,17 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 			logger.LegacyPrintf("service.openai_gateway", "bind video task account failed: account_id=%d task_id=%s err=%v", account.ID, result.ResponseID, err)
 		}
 		result.VideoCount = 1
+		v := contractFor(c)
+		v.SubmissionStatus, v.TaskID = "accepted", &result.ResponseID
+		v.Billing = VideoBillingStatus{Status: "pending"}
+		MarkMediaBillable(c)
+		observedStatus := gjson.GetBytes(responseBody, "status").String()
+		if observedStatus != "" {
+			observed := time.Now().UnixMilli()
+			source := "upstream"
+			final := observedStatus == "completed" || observedStatus == "failed" || observedStatus == "cancelled"
+			v.Status, v.IsFinal, v.StatusObservedAt, v.StatusSource = &observedStatus, &final, &observed, &source
+		}
 		if store, storeErr := s.videoStore(); storeErr == nil {
 			now := time.Now().Unix()
 			meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: result.ResponseID, APIKeyID: apiKey.ID, GroupID: derefGroupID(apiKey.GroupID), AccountID: account.ID, Protocol: VideoProtocolOpenAI, RequestedModel: originalModel, UpstreamModel: billingModel, BillingRequestID: resolveUsageBillingRequestID(ctx, result.RequestID), BoundAt: now, ExpiresAt: now + 604800}
@@ -442,6 +471,30 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 		}
 		result.Usage = extractOpenAIEmbeddingsUsage(responseBody)
 	}
-	writeOpenAIEmbeddingsUpstreamResponse(c, resp, responseBody, s.responseHeaderFilter)
+	var payload map[string]any
+	if json.Unmarshal(responseBody, &payload) != nil || payload == nil {
+		return nil, errors.New("Video upstream returned a response that is not a JSON object")
+	}
+	if request == nil && UpstreamBodyError(responseBody) && payload["status"] != "failed" {
+		CaptureUpstreamError(c, resp.StatusCode, resp.Header, responseBody)
+		UseUpstreamError(c)
+		WriteVideoFailure(c, &videoProtocolError{status: 502, code: "video_upstream_error", message: errordetail.Message(responseBody), diagnostic: map[string]any(GatewayErrorFields(c, "video_upstream_error", errordetail.Message(responseBody)))})
+		return nil, errors.New(errordetail.Message(responseBody))
+	}
+	if value, ok := payload["status"].(string); ok && value != "" {
+		v := contractFor(c)
+		observed, source := time.Now().UnixMilli(), "upstream"
+		final := value == "completed" || value == "failed" || value == "cancelled"
+		v.Status, v.IsFinal, v.StatusObservedAt, v.StatusSource = &value, &final, &observed, &source
+		if value == "failed" {
+			payload["error"] = errordetail.Value(payload["error"])
+			v.TaskError, _ = payload["error"].(map[string]any)
+		}
+	}
+	// Provider payloads cannot override relay-owned task identity or billing.
+	encodedContract, _ := json.Marshal(contractFor(c))
+	_ = json.Unmarshal(encodedContract, &payload)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	WriteMediaJSON(c, resp.StatusCode, payload)
 	return result, nil
 }

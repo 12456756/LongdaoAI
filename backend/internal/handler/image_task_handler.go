@@ -33,9 +33,8 @@ func NewAsyncImageHandler(tasks *service.ImageTaskService, openAI *OpenAIGateway
 	return h
 }
 
-// enabled reports whether the async image task feature is available. Object
-// storage is the enablement gate: without it the endpoints are fully disabled
-// so that large base64 results never land in Redis.
+// enabled gates only the existing background synchronous adapter. Provider jobs
+// use Redis metadata and do not require object storage.
 func (h *AsyncImageHandler) enabled() bool {
 	return h != nil && h.tasks != nil && h.tasks.Enabled()
 }
@@ -43,7 +42,7 @@ func (h *AsyncImageHandler) enabled() bool {
 // Submit accepts the same payload as the synchronous Images endpoint and
 // returns before the upstream image generation begins.
 func (h *AsyncImageHandler) Submit(c *gin.Context) {
-	if !h.enabled() {
+	if !h.enabled() && (h == nil || h.openAI == nil || h.openAI.gatewayService == nil) {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
 		return
 	}
@@ -82,6 +81,13 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	if h.tryProviderSubmit(c, apiKey, platform, body) {
+		return
+	}
+	if !h.enabled() {
+		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled for this account; configure naoshengyun_gpt_async or object storage")
+		return
+	}
 	if asyncImageRequestStreams(c.GetHeader("Content-Type"), body) {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "streaming image requests cannot be submitted as asynchronous tasks")
 		return
@@ -103,7 +109,8 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Location", pollURL)
 	c.Header("Retry-After", "3")
-	c.JSON(http.StatusAccepted, gin.H{
+	service.SetImageReceipt(c, task)
+	service.WriteMediaJSON(c, http.StatusAccepted, gin.H{
 		"id":         task.ID,
 		"task_id":    task.TaskID,
 		"object":     task.Object,
@@ -117,13 +124,20 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 }
 
 func (h *AsyncImageHandler) Get(c *gin.Context) {
-	if !h.enabled() {
+	if !h.enabled() && (h == nil || h.openAI == nil || h.openAI.gatewayService == nil) {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
 		return
 	}
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil || apiKey.UserID <= 0 || apiKey.ID <= 0 {
 		imageTaskError(c, service.ErrImageTaskForbidden)
+		return
+	}
+	if h.tryProviderRead(c, apiKey, false) {
+		return
+	}
+	if !h.enabled() {
+		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
 		return
 	}
 	task, err := h.tasks.Get(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID}, c.Param("task_id"))
@@ -135,7 +149,8 @@ func (h *AsyncImageHandler) Get(c *gin.Context) {
 	if task.Status == service.ImageTaskStatusProcessing {
 		c.Header("Retry-After", "3")
 	}
-	c.JSON(http.StatusOK, task)
+	service.SetImageReceipt(c, task)
+	service.WriteMediaJSON(c, http.StatusOK, task)
 }
 
 func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, body []byte) error {
@@ -300,5 +315,5 @@ func imageTaskError(c *gin.Context, err error) {
 
 func imageTaskJSONError(c *gin.Context, status int, code, message string) {
 	c.Header("Cache-Control", "no-store")
-	c.JSON(status, gin.H{"error": gin.H{"type": code, "code": code, "message": message}})
+	service.WriteMediaJSON(c, status, gin.H{"error": gin.H{"type": code, "code": code, "message": message}})
 }

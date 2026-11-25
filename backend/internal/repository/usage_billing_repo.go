@@ -41,18 +41,55 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 			_ = tx.Rollback()
 		}
 	}()
+	if cmd.DeferredVideo {
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM video_request_billing WHERE api_key_id=$1 AND user_id=$2 AND request_id=$3 FOR UPDATE`, cmd.APIKeyID, cmd.UserID, cmd.RequestID).Scan(&status); err != nil {
+			return nil, err
+		}
+		if status == "not_charged" {
+			return nil, errors.New("Video request was already finalized without a charge")
+		}
+		if status == "settled" {
+			return &service.UsageBillingApplyResult{Applied: false}, nil
+		}
+	}
+	if cmd.DeferredImage {
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM image_request_billing WHERE api_key_id=$1 AND user_id=$2 AND request_id=$3 FOR UPDATE`, cmd.APIKeyID, cmd.UserID, cmd.RequestID).Scan(&status); err != nil {
+			return nil, err
+		}
+		if status == "not_charged" {
+			return nil, errors.New("Image request was finalized without a charge")
+		}
+		if status == "settled" {
+			return &service.UsageBillingApplyResult{Applied: false}, nil
+		}
+	}
 
 	applied, err := r.claimUsageBillingKey(ctx, tx, cmd)
 	if err != nil {
 		return nil, err
 	}
 	if !applied {
+		if cmd.DeferredVideo || cmd.DeferredImage {
+			return nil, service.ErrUsageBillingRequestConflict
+		}
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
 
 	result := &service.UsageBillingApplyResult{Applied: true}
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
 		return nil, err
+	}
+	if cmd.DeferredVideo {
+		if _, err := tx.ExecContext(ctx, `UPDATE video_request_billing SET status='settled', actual_cost=$4, updated_at=NOW() WHERE api_key_id=$1 AND user_id=$2 AND request_id=$3`, cmd.APIKeyID, cmd.UserID, cmd.RequestID, cmd.BalanceCost+cmd.SubscriptionCost); err != nil {
+			return nil, err
+		}
+	}
+	if cmd.DeferredImage {
+		if _, err := tx.ExecContext(ctx, `UPDATE image_request_billing SET status='settled',actual_cost=$4,updated_at=NOW() WHERE api_key_id=$1 AND user_id=$2 AND request_id=$3`, cmd.APIKeyID, cmd.UserID, cmd.RequestID, cmd.BalanceCost+cmd.SubscriptionCost); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

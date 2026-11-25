@@ -97,7 +97,7 @@ func TestOpenAIVideosPriceGuardPreDispatchAndResponseIdentity(t *testing.T) {
 			router.ServeHTTP(w, r)
 			responseID := w.Header().Get("X-Client-Request-ID")
 			require.NotEmpty(t, responseID)
-			require.NotEqual(t, "caller-original-id", responseID)
+			require.Equal(t, "caller-original-id", responseID)
 			require.NotContains(t, w.Header().Values("X-Client-Request-ID"), "supplier-forged")
 			require.Len(t, w.Header().Values("X-Client-Request-ID"), 1)
 			switch scenario {

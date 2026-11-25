@@ -17,6 +17,9 @@ func TestGatewayRoutesVideoBillingReadOnlyContracts(t *testing.T) {
 	}
 	require.True(t, registered["POST /v1/sub2api/videos/pricing"])
 	require.True(t, registered["GET /v1/sub2api/videos/usage"])
+	require.True(t, registered["GET /v1/videos/:request_id"])
+	require.True(t, registered["PUT /v1/videos/:request_id/cancel"])
+	require.True(t, registered["PUT /videos/:request_id/cancel"])
 	// Existing image contracts keep their paths and methods.
 	require.True(t, registered["POST /v1/sub2api/images/pricing"])
 	require.True(t, registered["GET /v1/sub2api/usage"])

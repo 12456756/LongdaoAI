@@ -33,6 +33,8 @@ type UsageBillingCommand struct {
 	CacheReadTokens     int
 	ImageCount          int
 	MediaType           string
+	DeferredVideo       bool
+	DeferredImage       bool
 
 	BalanceCost         float64
 	SubscriptionCost    float64

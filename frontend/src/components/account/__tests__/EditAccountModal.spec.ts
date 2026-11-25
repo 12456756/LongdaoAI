@@ -409,6 +409,20 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.api_key).toBe('sk-test')
   })
 
+  it('loads and changes the async image protocol without clearing account credentials', async () => {
+    const account = buildAccount()
+    Object.assign(account.credentials, { image_protocol: 'naoshengyun_gpt_async' })
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const protocol = wrapper.get('[data-testid="openai-image-protocol"]')
+    expect((protocol.element as HTMLSelectElement).value).toBe('naoshengyun_gpt_async')
+    await protocol.setValue('background_sync')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.image_protocol).toBe('background_sync')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.api_key).toBe('sk-test')
+  })
+
   it('loads and submits the per-account OpenAI long-context billing toggle', async () => {
     const account = buildAccount()
     account.extra = {

@@ -20,6 +20,9 @@ func (a *Account) VideoProtocol() string {
 }
 
 func ValidateVideoProtocolCredentials(credentials map[string]any) error {
+	if err := ValidateImageProtocolCredentials(credentials); err != nil {
+		return err
+	}
 	if v, exists := credentials["video_protocol"]; exists && v != VideoProtocolOpenAI && v != VideoProtocolLegacy {
 		return infraerrors.BadRequest("INVALID_VIDEO_PROTOCOL", "video_protocol must be openai_videos or naoshengyun_legacy")
 	}
@@ -27,20 +30,27 @@ func ValidateVideoProtocolCredentials(credentials map[string]any) error {
 }
 
 type VideoTaskMetadata struct {
-	SchemaVersion     int      `json:"schema_version"`
-	TaskID            string   `json:"task_id"`
-	APIKeyID          int64    `json:"api_key_id"`
-	GroupID           int64    `json:"group_id"`
-	AccountID         int64    `json:"account_id"`
-	Protocol          string   `json:"protocol"`
-	RequestedModel    string   `json:"requested_model"`
-	UpstreamModel     string   `json:"upstream_model"`
-	ReferenceAssetID  string   `json:"reference_asset_id,omitempty"`
-	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
-	BillingRequestID  string   `json:"billing_request_id"`
-	LastStatus        string   `json:"last_status"`
-	BoundAt           int64    `json:"bound_at"`
-	ExpiresAt         int64    `json:"expires_at"`
+	SchemaVersion     int                   `json:"schema_version"`
+	TaskID            string                `json:"task_id"`
+	APIKeyID          int64                 `json:"api_key_id"`
+	GroupID           int64                 `json:"group_id"`
+	AccountID         int64                 `json:"account_id"`
+	Protocol          string                `json:"protocol"`
+	RequestedModel    string                `json:"requested_model"`
+	UpstreamModel     string                `json:"upstream_model"`
+	ReferenceAssetID  string                `json:"reference_asset_id,omitempty"`
+	ReferenceAssetIDs []string              `json:"reference_asset_ids,omitempty"`
+	BillingRequestID  string                `json:"billing_request_id"`
+	LastStatus        string                `json:"last_status"`
+	BoundAt           int64                 `json:"bound_at"`
+	ExpiresAt         int64                 `json:"expires_at"`
+	RequestID         string                `json:"request_id,omitempty"`
+	SubmissionKey     string                `json:"submission_key,omitempty"`
+	ObservedAt        int64                 `json:"observed_at,omitempty"`
+	TaskError         map[string]any        `json:"task_error,omitempty"`
+	Billing           *VideoBillingSnapshot `json:"billing,omitempty"`
+	SubmissionRetry   *VideoSubmissionRetry `json:"submission_retry,omitempty"`
+	SubmissionStatus  string                `json:"submission_status,omitempty"`
 }
 
 type VideoReference struct {
@@ -74,9 +84,11 @@ type VideoStateStore interface {
 	VideoLoad(context.Context, string) ([]byte, error)
 	VideoSave(context.Context, string, []byte, time.Time, bool) (bool, error)
 	VideoReplace(context.Context, string, []byte) (bool, error)
+	VideoReplaceIfEqual(context.Context, string, []byte, []byte) (bool, error)
 	VideoDeleteIfEqual(context.Context, string, []byte) error
 	VideoBind(context.Context, *VideoTaskMetadata) error
 	VideoStatus(context.Context, string, string) (string, error)
+	VideoObserve(context.Context, string, string, int64, map[string]any) (*VideoTaskMetadata, error)
 	VideoSaveReference(context.Context, *VideoReference) error
 	VideoLoadReference(context.Context, string) (*VideoReference, error)
 	VideoReferenceTask(context.Context, string, string) error
