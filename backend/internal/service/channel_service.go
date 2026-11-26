@@ -140,6 +140,7 @@ const (
 
 // ChannelService 渠道管理服务
 type ChannelService struct {
+	basePrices           ModelBasePriceRepository
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator

@@ -194,6 +194,10 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		return nil, err
 	}
 
+	if err := service.ClaimSEPUpstreamDispatch(req, accountID); err != nil {
+		atomic.AddInt64(&entry.inFlight, -1)
+		return nil, err
+	}
 	// 执行请求
 	resp, err := servertiming.Do(httpClientForUpstreamRequest(entry.client, req), req)
 	if err != nil {
@@ -256,6 +260,10 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error", err)
 		return nil, err
 	}
+	if err := service.ClaimSEPUpstreamDispatch(req, accountID); err != nil {
+		atomic.AddInt64(&entry.inFlight, -1)
+		return nil, err
+	}
 
 	resp, err := servertiming.Do(httpClientForUpstreamRequest(entry.client, req), req)
 	if err != nil {
@@ -276,7 +284,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 }
 
 func httpClientForUpstreamRequest(client *http.Client, req *http.Request) *http.Client {
-	if client == nil || req == nil || !service.HTTPUpstreamRedirectsDisabled(req.Context()) {
+	if client == nil || req == nil || (!service.HTTPUpstreamRedirectsDisabled(req.Context()) && service.SEPExecutionFromContext(req.Context()) == nil) {
 		return client
 	}
 	clone := *client

@@ -2,11 +2,13 @@
   <BaseDialog
     :show="show"
     :title="t('admin.accounts.createAccount')"
-    width="wide"
+    width="extra-wide"
+    :panel-class="step === 1 ? 'account-editor-dialog' : undefined"
+    :body-class="step === 1 ? 'account-editor-body' : undefined"
     @close="handleClose"
   >
     <!-- Step Indicator for OAuth accounts -->
-    <div v-if="isOAuthFlow" class="mb-6 flex items-center justify-center">
+    <div v-if="isOAuthFlow && step !== 1" class="mb-6 flex items-center justify-center">
       <div class="flex items-center space-x-4">
         <div class="flex items-center">
           <div
@@ -43,8 +45,11 @@
       v-if="step === 1"
       id="create-account-form"
       @submit.prevent="handleSubmit"
-      class="space-y-5"
+      @invalid.capture="accountSection = ($event.target as HTMLElement).closest('.account-pricing') ? 'pricing' : 'account'"
+      class="account-editor-form"
     >
+      <AccountFormTabs v-model="accountSection" :count="pricingDraft.prices.length" />
+      <div v-show="accountSection === 'account'" class="account-configuration space-y-5">
       <div>
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
@@ -66,6 +71,8 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
+
+      <AccountUpstreamCompanyField v-model="pricingDraft.companyId" @company-name="pricingCompanyName = $event" />
 
       <!-- Platform Selection - Segmented Control Style -->
       <div>
@@ -3125,6 +3132,8 @@
         />
       </div>
 
+      </div>
+    <AccountModelPricingEditor v-show="accountSection === 'pricing'" v-model="pricingDraft" :account-name="form.name" :company-name="pricingCompanyName" :restricted-models="pricingWhitelist" :models="pricingMappings.map(m => m.from)" :mappings="pricingMappings" @dirty-count="pricingDirtyCount = $event" />
     </form>
 
     <!-- Step 2: OAuth Authorization -->
@@ -3165,7 +3174,8 @@
     </div>
 
     <template #footer>
-      <div v-if="step === 1" class="flex justify-end gap-3">
+      <div v-if="step === 1" class="account-editor-footer">
+        <span v-if="pricingDirtyCount" class="pricing-dirty-summary" role="status">{{ pricingDirtyCount }} 个模型报价未保存</span>
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
@@ -3201,7 +3211,7 @@
               ? t('common.next')
               : submitting
                 ? t('admin.accounts.creating')
-                : t('common.create')
+                : t('admin.accounts.createAccount')
           }}
         </button>
       </div>
@@ -3518,6 +3528,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import AccountModelPricingEditor from './AccountModelPricingEditor.vue'
+import AccountUpstreamCompanyField from './AccountUpstreamCompanyField.vue'
+import './accountEditorDialog.css'
+import AccountFormTabs from './AccountFormTabs.vue'
+import { configuredPrices, type AccountPricingDraft } from '@/api/admin/modelPricing'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3595,6 +3610,14 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const accountSection = ref('account')
+const pricingCompanyName = ref('未归属'), pricingDirtyCount = ref(0)
+watch(() => props.show, () => { accountSection.value = 'account' })
+const pricingDraft = ref<AccountPricingDraft>({ companyId: 0, prices: [], loaded: false })
+const createPricedAccount = (payload: CreateAccountRequest) => {
+  if (!pricingDraft.value.loaded) return Promise.reject(new Error('账号价格尚未读取完成，请检查模型价格区域后重试'))
+  return adminAPI.accounts.create({ ...payload, upstream_company_id: pricingDraft.value.companyId, model_prices: configuredPrices(pricingDraft.value.prices), model_prices_version: pricingDraft.value.version })
+}
 const emit = defineEmits<{
   close: []
   created: []
@@ -3802,6 +3825,8 @@ const upstreamApiKey = ref('') // For upstream type: API key
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
+const pricingWhitelist = computed(() => form.platform !== 'antigravity' && modelRestrictionMode.value === 'whitelist' ? allowedModels.value : [])
+const pricingMappings = computed(() => form.platform === 'antigravity' ? antigravityModelMappings.value : modelRestrictionMode.value === 'mapping' ? modelMappings.value : [])
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
@@ -4550,7 +4575,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
     })
     return false
   } catch (error: any) {
-    appStore.showError(error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
+    appStore.showError(error.message || error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
     return false
   }
 }
@@ -4558,7 +4583,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    await createPricedAccount(withAntigravityConfirmFlag(payload))
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
     handleClose()
@@ -4573,7 +4598,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       })
       return
     }
-    appStore.showError(error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
+    appStore.showError(error.message || error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
   } finally {
     submitting.value = false
   }
@@ -4688,6 +4713,7 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
+  pricingDraft.value = { companyId: 0, prices: [], loaded: false }
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5276,7 +5302,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await createPricedAccount({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -5442,7 +5468,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await createPricedAccount({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -5550,7 +5576,11 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
+    if (!pricingDraft.value.loaded) throw new Error('账号价格尚未读取完成，请检查模型价格区域后重试')
     const result = await adminAPI.accounts.importCodexSession({
+      upstream_company_id: pricingDraft.value.companyId,
+      model_prices: configuredPrices(pricingDraft.value.prices).length ? configuredPrices(pricingDraft.value.prices) : undefined,
+      model_prices_version: pricingDraft.value.version,
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -5628,7 +5658,11 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
+    if (!pricingDraft.value.loaded) throw new Error('账号价格尚未读取完成，请检查模型价格区域后重试')
     await adminAPI.accounts.createOpenAICodexPAT({
+      upstream_company_id: pricingDraft.value.companyId,
+      model_prices: configuredPrices(pricingDraft.value.prices),
+      model_prices_version: pricingDraft.value.version,
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -5723,7 +5757,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await createPricedAccount({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -5838,7 +5872,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await adminAPI.accounts.create(createPayload)
+        await createPricedAccount(createPayload)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6203,7 +6237,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        await createPricedAccount({
           name: accountName,
           notes: form.notes,
           platform: form.platform,

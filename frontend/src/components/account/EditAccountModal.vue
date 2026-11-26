@@ -2,15 +2,20 @@
   <BaseDialog
     :show="show"
     :title="t('admin.accounts.editAccount')"
-    width="wide"
+    width="extra-wide"
+    panel-class="account-editor-dialog"
+    body-class="account-editor-body"
     @close="handleClose"
   >
     <form
       v-if="account"
       id="edit-account-form"
       @submit.prevent="handleSubmit"
-      class="space-y-5"
+      @invalid.capture="accountSection = ($event.target as HTMLElement).closest('.account-pricing') ? 'pricing' : 'account'"
+      class="account-editor-form"
     >
+      <AccountFormTabs v-model="accountSection" :count="pricingDraft.prices.length" />
+      <div v-show="accountSection === 'account'" class="account-configuration space-y-5">
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -25,6 +30,8 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
+
+      <AccountUpstreamCompanyField v-model="pricingDraft.companyId" @company-name="pricingCompanyName = $event" />
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
@@ -2509,10 +2516,13 @@
         data-tour="account-form-groups"
       />
 
+      </div>
+    <AccountModelPricingEditor v-show="accountSection === 'pricing'" v-model="pricingDraft" :key="account?.id" :account-id="account?.id" :account-name="form.name" :company-name="pricingCompanyName" :restricted-models="account?.platform === 'antigravity' ? [] : allowedModels" :models="pricingMappings.map(m => m.from)" :mappings="pricingMappings" @dirty-count="pricingDirtyCount = $event" />
     </form>
 
     <template #footer>
-      <div v-if="account" class="flex justify-end gap-3">
+      <div v-if="account" class="account-editor-footer">
+        <span v-if="pricingDirtyCount" class="pricing-dirty-summary" role="status">{{ pricingDirtyCount }} 个模型报价未保存</span>
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
@@ -2543,7 +2553,7 @@
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             ></path>
           </svg>
-          {{ submitting ? t('admin.accounts.updating') : t('common.update') }}
+          {{ submitting ? t('admin.accounts.updating') : '保存修改' }}
         </button>
       </div>
     </template>
@@ -2583,6 +2593,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
+import AccountModelPricingEditor from './AccountModelPricingEditor.vue'
+import AccountUpstreamCompanyField from './AccountUpstreamCompanyField.vue'
+import './accountEditorDialog.css'
+import AccountFormTabs from './AccountFormTabs.vue'
+import { configuredPrices, type AccountPricingDraft } from '@/api/admin/modelPricing'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -2633,6 +2648,10 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const accountSection = ref('account')
+const pricingCompanyName = ref('未归属'), pricingDirtyCount = ref(0)
+watch(() => props.show, () => { accountSection.value = 'account' })
+const pricingDraft = ref<AccountPricingDraft>({ companyId: 0, prices: [], loaded: false })
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
@@ -2758,6 +2777,7 @@ const antigravityProjectId = ref('')
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
+const pricingMappings = computed(() => props.account?.platform === 'antigravity' ? antigravityModelMappings.value : modelMappings.value)
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
@@ -3203,6 +3223,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
+  pricingDraft.value = { companyId: newAccount.upstream_company_id || 0, prices: [], loaded: false }
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -3967,7 +3988,8 @@ const handleClose = () => {
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    const updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    if (!pricingDraft.value.loaded) throw new Error('账号价格尚未读取完成，请检查模型价格区域后重试')
+    const updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag({ ...updatePayload, upstream_company_id: pricingDraft.value.companyId, model_prices: configuredPrices(pricingDraft.value.prices), model_prices_version: pricingDraft.value.version }))
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
     handleClose()

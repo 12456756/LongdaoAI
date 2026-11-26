@@ -480,6 +480,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-pricing',
+    name: 'AdminModelPricing',
+    component: () => import('@/views/admin/ModelPricingView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: '模型基础价格' }
+  },
+    {
+      path: '/admin/sep',
+      name: 'AdminSEPIntegration',
+      component: () => import('@/views/admin/SEPIntegrationView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true, title: 'SEP 企业对接' }
+    },
+  {
     path: '/admin/channels/monitor',
     name: 'AdminChannelMonitor',
     component: () => import('@/views/admin/ChannelMonitorView.vue'),

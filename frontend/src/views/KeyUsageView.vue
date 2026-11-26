@@ -830,7 +830,7 @@ const showDailyUsage = computed(() => Boolean(resultData.value && Array.isArray(
 // ==================== Utility Functions ====================
 
 // 公开 key 用量页金额一律按 ¥ 显示（USD×显示汇率）。这是纯展示换算，不参与计费。
-// 显示汇率来自公开设置（balance_display_cny_rate，默认 7.15）。
+// 显示汇率来自公开设置（platform_usd_to_cny_rate，默认 7.15）。
 function usd(value: number | null | undefined): string {
   if (value == null || value < 0) return '-'
   return formatCostDisplay(Number(value), appStore.balanceDisplayCnyRate, 2)

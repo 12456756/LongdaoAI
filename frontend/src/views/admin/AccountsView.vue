@@ -62,6 +62,7 @@
                 </div>
               </div>
 
+              <select v-model="params.upstream_company_id" class="input w-44" aria-label="筛选上游公司" @change="reload()"><option value="">全部上游公司</option><option value="0">未归属</option><option v-for="company in upstreamCompanies" :key="company.id" :value="String(company.id)">{{ company.name }}</option></select>
               <!-- More Tools Dropdown -->
               <div class="relative" ref="accountToolsDropdownRef">
                 <button
@@ -253,6 +254,7 @@
           <template #cell-name="{ row, value }">
             <div class="flex flex-col">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+                <span class="text-xs text-gray-500">{{ upstreamCompanies.find(c => c.id === row.upstream_company_id)?.name || '未归属上游公司' }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -444,7 +446,7 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="handlePricingAccountCreated" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
@@ -480,6 +482,7 @@
 </template>
 
 <script setup lang="ts">
+import { modelPricingAPI, type Company } from '@/api/admin/modelPricing'
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -543,6 +546,7 @@ type AccountBulkEditTarget =
   | {
       mode: 'filtered'
       filters: {
+		upstream_company_id?: string
         platform?: string
         type?: string
         status?: string
@@ -882,6 +886,10 @@ const toggleColumn = (key: string) => {
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 const shouldIncludeSchedulerScore = () => isColumnVisible('scheduler_score')
+const upstreamCompanies = ref<Company[]>([])
+async function loadUpstreamCompanies() { try { upstreamCompanies.value = await modelPricingAPI.companies() } catch (e) { appStore.showError(extractApiErrorMessage(e, '读取上游公司列表失败')) } }
+function handlePricingAccountCreated() { void loadUpstreamCompanies(); reload() }
+onMounted(loadUpstreamCompanies)
 const syncAccountListDerivedParams = () => {
   // Keep every load path, including auto-refresh and sorting, aligned with the current column visibility.
   const requestParams = params as any
@@ -1619,6 +1627,7 @@ const buildBulkEditFilterSnapshot = () => {
   const rawParams = toRaw(params) as Record<string, unknown>
   const sortOrder: AccountSortOrder = rawParams.sort_order === 'desc' ? 'desc' : 'asc'
   return {
+	upstream_company_id: typeof rawParams.upstream_company_id === 'string' ? rawParams.upstream_company_id : '',
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
@@ -1670,6 +1679,7 @@ const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
+	upstream_company_id: params.upstream_company_id || '',
   platform: params.platform || '',
   type: params.type || '',
   status: params.status || '',
@@ -1681,6 +1691,7 @@ const buildAccountQueryFilters = () => ({
 })
 const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
+  if (filters.upstream_company_id && String(account.upstream_company_id || 0) !== filters.upstream_company_id) return false
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
   if (filters.status) {
@@ -1784,6 +1795,7 @@ const handleProbeUpstreamBilling = async (account: Account) => {
   }
 }
 const handleAccountUpdated = (updatedAccount: Account) => {
+	void loadUpstreamCompanies()
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
 }

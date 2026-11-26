@@ -398,21 +398,31 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if input.UpstreamCompanyID != nil && *input.UpstreamCompanyID < 0 {
+		return nil, infraerrors.New(http.StatusBadRequest, "invalid_upstream_company", "上游公司编号无效")
+	}
+	if input.ModelPrices != nil {
+		if err := ValidateAccountModelPrices(*input.ModelPrices); err != nil {
+			return nil, err
+		}
+	}
 	// Probe state is system-managed. New accounts always start with auto probe disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		UpstreamCompanyID: input.UpstreamCompanyID,
+		PricingUpdate:     &AccountPricingUpdate{CompanyID: input.UpstreamCompanyID, Prices: input.ModelPrices, ExpectedVersion: input.ModelPricesVersion},
+		Name:              input.Name,
+		Notes:             normalizeAccountNotes(input.Notes),
+		Platform:          input.Platform,
+		Type:              input.Type,
+		Credentials:       input.Credentials,
+		Extra:             accountExtra,
+		ProxyID:           input.ProxyID,
+		Concurrency:       normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:          input.Priority,
+		Status:            StatusActive,
+		Schedulable:       true,
 	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
@@ -534,6 +544,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if input.ModelPrices != nil {
+		if err := ValidateAccountModelPrices(*input.ModelPrices); err != nil {
+			return nil, err
+		}
+	}
+	account.PricingUpdate = &AccountPricingUpdate{CompanyID: input.UpstreamCompanyID, Prices: input.ModelPrices, ExpectedVersion: input.ModelPricesVersion}
+	if input.UpstreamCompanyID != nil && *input.UpstreamCompanyID < 0 {
+		return nil, infraerrors.New(http.StatusBadRequest, "invalid_upstream_company", "上游公司编号无效")
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
@@ -1009,6 +1028,13 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
 	if filters == nil {
 		return nil, nil
+	}
+	if raw := strings.TrimSpace(filters.UpstreamCompanyID); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			return nil, infraerrors.New(http.StatusBadRequest, "invalid_upstream_company", "上游公司筛选编号无效")
+		}
+		ctx = WithUpstreamCompanyFilter(ctx, id)
 	}
 
 	groupID := int64(0)

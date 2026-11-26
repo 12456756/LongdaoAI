@@ -493,6 +493,11 @@ func (s *OpenAIGatewayService) queryLegacyVideo(ctx context.Context, account *Ac
 		return nil, nil, videoCause(503, "video_task_metadata_unavailable", "Write video task status to Redis", err)
 	}
 	meta.LastStatus = status
+	if key.SEP != nil {
+		if err = key.SEP.Service.ObserveVideo(ctx, key, id, sepJSON(map[string]any{"status": status})); err != nil {
+			return nil, nil, err
+		}
+	}
 	if task.Status == "failed" {
 		failure := legacyTaskFailure(task, account.GetOpenAIApiKey())
 		slog.Warn("video_legacy.task_failed", "task_id", id, "account_id", account.ID,
@@ -693,5 +698,10 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 		}
 	}
 	c.JSON(202, normalizedVideoTask{Object: "video", ID: task.ID, Model: request.Model, Status: status})
+	if key.SEP != nil {
+		if err = key.SEP.Service.RecordExecutionProvider(ctx, key, "", task.ID); err != nil {
+			return nil, err
+		}
+	}
 	return &OpenAIForwardResult{ResponseID: task.ID, Model: request.Model, BillingModel: upstreamModel, UpstreamModel: upstreamModel, VideoCount: 1, VideoResolution: request.Resolution, VideoDurationSeconds: request.Seconds, Duration: time.Since(started)}, nil
 }

@@ -58,6 +58,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	if SEPExecutionFromContext(ctx) != nil {
+		wsDecision = OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportHTTPSSE, Reason: "sep_single_dispatch"}
+	}
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()

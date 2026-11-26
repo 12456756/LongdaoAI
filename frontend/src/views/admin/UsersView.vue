@@ -413,7 +413,7 @@
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   @click="handleBalanceHistory(row)"
                 >
-                  ${{ value.toFixed(2) }}
+                  {{ row.sep_balance ? '¥' + row.sep_balance.available_paid_cny : '$' + value.toFixed(2) }}
                 </button>
                 <!-- Instant tooltip -->
                 <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 dark:bg-dark-600">
@@ -1757,6 +1757,7 @@ const closeBalanceModal = () => {
 }
 
 const handleBalanceHistory = (user: AdminUser) => {
+	if (user.sep_balance) { window.location.assign('/admin/sep?enterprise=' + encodeURIComponent(user.sep_balance.enterprise_id)); return }
   balanceHistoryUser.value = user
   showBalanceHistoryModal.value = true
 }

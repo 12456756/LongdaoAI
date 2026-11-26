@@ -2286,6 +2286,8 @@ type AccountMutation struct {
 	created_at                  *time.Time
 	updated_at                  *time.Time
 	deleted_at                  *time.Time
+	upstream_company_id         *int64
+	addupstream_company_id      *int64
 	name                        *string
 	notes                       *string
 	platform                    *string
@@ -2553,6 +2555,76 @@ func (m *AccountMutation) DeletedAtCleared() bool {
 func (m *AccountMutation) ResetDeletedAt() {
 	m.deleted_at = nil
 	delete(m.clearedFields, account.FieldDeletedAt)
+}
+
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (m *AccountMutation) SetUpstreamCompanyID(i int64) {
+	m.upstream_company_id = &i
+	m.addupstream_company_id = nil
+}
+
+// UpstreamCompanyID returns the value of the "upstream_company_id" field in the mutation.
+func (m *AccountMutation) UpstreamCompanyID() (r int64, exists bool) {
+	v := m.upstream_company_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamCompanyID returns the old "upstream_company_id" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldUpstreamCompanyID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamCompanyID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamCompanyID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamCompanyID: %w", err)
+	}
+	return oldValue.UpstreamCompanyID, nil
+}
+
+// AddUpstreamCompanyID adds i to the "upstream_company_id" field.
+func (m *AccountMutation) AddUpstreamCompanyID(i int64) {
+	if m.addupstream_company_id != nil {
+		*m.addupstream_company_id += i
+	} else {
+		m.addupstream_company_id = &i
+	}
+}
+
+// AddedUpstreamCompanyID returns the value that was added to the "upstream_company_id" field in this mutation.
+func (m *AccountMutation) AddedUpstreamCompanyID() (r int64, exists bool) {
+	v := m.addupstream_company_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (m *AccountMutation) ClearUpstreamCompanyID() {
+	m.upstream_company_id = nil
+	m.addupstream_company_id = nil
+	m.clearedFields[account.FieldUpstreamCompanyID] = struct{}{}
+}
+
+// UpstreamCompanyIDCleared returns if the "upstream_company_id" field was cleared in this mutation.
+func (m *AccountMutation) UpstreamCompanyIDCleared() bool {
+	_, ok := m.clearedFields[account.FieldUpstreamCompanyID]
+	return ok
+}
+
+// ResetUpstreamCompanyID resets all changes to the "upstream_company_id" field.
+func (m *AccountMutation) ResetUpstreamCompanyID() {
+	m.upstream_company_id = nil
+	m.addupstream_company_id = nil
+	delete(m.clearedFields, account.FieldUpstreamCompanyID)
 }
 
 // SetName sets the "name" field.
@@ -4136,7 +4208,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4145,6 +4217,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.deleted_at != nil {
 		fields = append(fields, account.FieldDeletedAt)
+	}
+	if m.upstream_company_id != nil {
+		fields = append(fields, account.FieldUpstreamCompanyID)
 	}
 	if m.name != nil {
 		fields = append(fields, account.FieldName)
@@ -4244,6 +4319,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.UpdatedAt()
 	case account.FieldDeletedAt:
 		return m.DeletedAt()
+	case account.FieldUpstreamCompanyID:
+		return m.UpstreamCompanyID()
 	case account.FieldName:
 		return m.Name()
 	case account.FieldNotes:
@@ -4315,6 +4392,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldUpdatedAt(ctx)
 	case account.FieldDeletedAt:
 		return m.OldDeletedAt(ctx)
+	case account.FieldUpstreamCompanyID:
+		return m.OldUpstreamCompanyID(ctx)
 	case account.FieldName:
 		return m.OldName(ctx)
 	case account.FieldNotes:
@@ -4400,6 +4479,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDeletedAt(v)
+		return nil
+	case account.FieldUpstreamCompanyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamCompanyID(v)
 		return nil
 	case account.FieldName:
 		v, ok := value.(string)
@@ -4605,6 +4691,9 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *AccountMutation) AddedFields() []string {
 	var fields []string
+	if m.addupstream_company_id != nil {
+		fields = append(fields, account.FieldUpstreamCompanyID)
+	}
 	if m.addproxy_fallback_origin_id != nil {
 		fields = append(fields, account.FieldProxyFallbackOriginID)
 	}
@@ -4628,6 +4717,8 @@ func (m *AccountMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case account.FieldUpstreamCompanyID:
+		return m.AddedUpstreamCompanyID()
 	case account.FieldProxyFallbackOriginID:
 		return m.AddedProxyFallbackOriginID()
 	case account.FieldConcurrency:
@@ -4647,6 +4738,13 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *AccountMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case account.FieldUpstreamCompanyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUpstreamCompanyID(v)
+		return nil
 	case account.FieldProxyFallbackOriginID:
 		v, ok := value.(int64)
 		if !ok {
@@ -4692,6 +4790,9 @@ func (m *AccountMutation) ClearedFields() []string {
 	var fields []string
 	if m.FieldCleared(account.FieldDeletedAt) {
 		fields = append(fields, account.FieldDeletedAt)
+	}
+	if m.FieldCleared(account.FieldUpstreamCompanyID) {
+		fields = append(fields, account.FieldUpstreamCompanyID)
 	}
 	if m.FieldCleared(account.FieldNotes) {
 		fields = append(fields, account.FieldNotes)
@@ -4758,6 +4859,9 @@ func (m *AccountMutation) ClearField(name string) error {
 	case account.FieldDeletedAt:
 		m.ClearDeletedAt()
 		return nil
+	case account.FieldUpstreamCompanyID:
+		m.ClearUpstreamCompanyID()
+		return nil
 	case account.FieldNotes:
 		m.ClearNotes()
 		return nil
@@ -4822,6 +4926,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldDeletedAt:
 		m.ResetDeletedAt()
+		return nil
+	case account.FieldUpstreamCompanyID:
+		m.ResetUpstreamCompanyID()
 		return nil
 	case account.FieldName:
 		m.ResetName()

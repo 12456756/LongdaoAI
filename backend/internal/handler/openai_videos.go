@@ -48,6 +48,14 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid video task ID")
 		return
 	}
+	if !create && apiKey.SEP != nil {
+		var err error
+		apiKey, _, err = apiKey.SEP.Service.RestoreTaskGroup(ctx, apiKey, taskID)
+		if err != nil {
+			h.errorResponse(c, 404, "not_found_error", "Video task not found for this enterprise")
+			return
+		}
+	}
 	var request *service.OpenAIVideoRequest
 	var body []byte
 	var err error

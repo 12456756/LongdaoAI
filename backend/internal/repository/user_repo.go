@@ -30,6 +30,7 @@ import (
 type userRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
+	sep    *service.SEPService
 }
 
 var _ service.RedeemUserAdjustmentRepository = (*userRepository)(nil)
@@ -133,7 +134,7 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
 	}
-	return out, nil
+	return out, r.enrichSEPUser(ctx, out)
 }
 
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
@@ -150,7 +151,7 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
 	}
-	return out, nil
+	return out, r.enrichSEPUser(ctx, out)
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service.User, error) {
@@ -177,7 +178,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	if v, ok := groups[m.ID]; ok {
 		out.AllowedGroups = v
 	}
-	return out, nil
+	return out, r.enrichSEPUser(ctx, out)
 }
 
 func (r *userRepository) Update(ctx context.Context, userIn *service.User) error {
@@ -233,7 +234,6 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetNotes(userIn.Notes).
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
-		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetBalanceNotifyEnabled(userIn.BalanceNotifyEnabled).
@@ -242,6 +242,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetBalanceNotifyExtraEmails(marshalExtraEmails(userIn.BalanceNotifyExtraEmails)).
 		SetTotalRecharged(userIn.TotalRecharged).
 		SetRpmLimit(userIn.RPMLimit)
+	if userIn.SEPBalance == nil {
+		updateOp.SetBalance(userIn.Balance)
+	}
 	if userIn.SignupSource != "" {
 		updateOp = updateOp.SetSignupSource(userIn.SignupSource)
 	}
@@ -552,6 +555,9 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		}
 	}
 
+	if err := r.enrichSEPUsers(ctx, outUsers); err != nil {
+		return nil, nil, err
+	}
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
 }
 

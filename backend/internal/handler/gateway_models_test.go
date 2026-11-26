@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +18,7 @@ type gatewayModelsAccountRepoStub struct {
 	service.AccountRepository
 
 	byGroup map[int64][]service.Account
+	err     error
 }
 
 type gatewayModelsResponseForTest struct {
@@ -33,6 +35,9 @@ type gatewayModelItemForTest struct {
 }
 
 func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	accounts, ok := s.byGroup[groupID]
 	if !ok {
 		return nil, nil
@@ -50,6 +55,23 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository) *GatewayHand
 			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		),
 	}
+}
+
+func TestSEPModelsHandlerDoesNotMaskDirectoryFailureWithDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{err: errors.New("model repository connection refused")})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	group := &service.Group{ID: 10, Platform: service.PlatformOpenAI}
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{GroupID: &group.ID, Group: group, SEP: &service.SEPExecution{Kind: "chat"}})
+	h.Models(c)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotContains(t, got, "data")
+	require.NotEmpty(t, got["request_id"])
+	require.Contains(t, got["diagnostic"], "model repository connection refused")
 }
 
 func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {

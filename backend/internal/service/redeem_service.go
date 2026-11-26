@@ -429,9 +429,29 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	}
 
 	// 获取用户信息
-	_, err = s.userRepo.GetByID(ctx, userID)
+	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
+	}
+	if user.SEPBalance != nil {
+		if redeemCode.Type == RedeemTypeSubscription {
+			return nil, infraerrors.BadRequest("SEP_SUBSCRIPTION_NOT_SUPPORTED", "SEP 企业使用共享人民币余额，不支持兑换订阅套餐")
+		}
+		if redeemCode.Type == RedeemTypeBalance {
+			accounting := s.userRepo.(SEPAccountAccounting)
+			operation := "add"
+			amount := redeemCode.Value
+			if amount < 0 {
+				operation = "subtract"
+				amount = -amount
+			}
+			_, err = accounting.AdjustSEPAccountBalance(ctx, SEPBalanceChange{UserID: userID, BusinessRef: fmt.Sprintf("redeem:%d", redeemCode.ID), RedeemCodeID: redeemCode.ID, Operation: operation, Amount: fmt.Sprint(amount), Currency: "USD", Notes: "余额兑换"})
+			if err != nil {
+				return nil, SEPAdminBalanceError(err)
+			}
+			s.invalidateRedeemCaches(ctx, userID, redeemCode)
+			return s.redeemRepo.GetByID(ctx, redeemCode.ID)
+		}
 	}
 
 	// 使用数据库事务保证兑换码标记与权益发放的原子性

@@ -3,6 +3,7 @@ package dto
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -18,6 +19,8 @@ func UserFromServiceShallow(u *service.User) *User {
 		Username:                   u.Username,
 		Role:                       u.Role,
 		Balance:                    u.Balance,
+		SEPBalance:                 u.SEPBalance,
+		SEPBalanceReceipt:          u.SEPBalanceReceipt,
 		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
 		Status:                     u.Status,
@@ -79,10 +82,14 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	if k == nil {
 		return nil
 	}
+	publicKey := k.Key
+	if strings.HasPrefix(publicKey, "sk-sep-") && len(publicKey) > 16 {
+		publicKey = publicKey[:10] + "..." + publicKey[len(publicKey)-4:]
+	}
 	out := &APIKey{
 		ID:                 k.ID,
 		UserID:             k.UserID,
-		Key:                k.Key,
+		Key:                publicKey,
 		Name:               k.Name,
 		GroupID:            k.GroupID,
 		Status:             k.Status,
@@ -218,6 +225,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
 	out := &Account{
+		UpstreamCompanyID:       a.UpstreamCompanyID,
+		ModelPrices:             a.ModelPrices,
 		ID:                      a.ID,
 		Name:                    a.Name,
 		Notes:                   a.Notes,

@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/payment/provider"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
+	"github.com/shopspring/decimal"
 )
 
 // --- Refund Flow ---
@@ -234,7 +235,7 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 		amt = o.Amount
 	}
 	orderCurrency := PaymentOrderCurrency(o)
-	if amt-o.Amount > paymentAmountToleranceForCurrency(orderCurrency) {
+	if amt > o.Amount {
 		return nil, nil, infraerrors.BadRequest("REFUND_AMOUNT_EXCEEDED", "refund amount exceeds recharge")
 	}
 	ga := calculateGatewayRefundAmount(o.Amount, o.PayAmount, amt, orderCurrency)
@@ -246,6 +247,26 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 		rr = fmt.Sprintf("refund order:%d", o.ID)
 	}
 	p := &RefundPlan{OrderID: oid, Order: o, RefundAmount: amt, GatewayAmount: ga, Reason: rr, Force: force, DeductBalance: deduct, DeductionType: payment.DeductionTypeNone}
+	if accounting, ok := s.userRepo.(SEPAccountAccounting); ok {
+		b, err := accounting.SEPAccountBalance(ctx, o.UserID)
+		if err != nil {
+			return nil, nil, SEPAdminBalanceError(err)
+		}
+		if b != nil {
+			if !deduct {
+				return nil, nil, infraerrors.BadRequest("SEP_REFUND_DEDUCTION_REQUIRED", "SEP 企业退款必须扣回对应人民币余额，不能仅退支付款而保留算力余额")
+			}
+			credit, _, err := sepOrderCredit(o)
+			if err != nil {
+				return nil, nil, err
+			}
+			full, _ := decimal.NewFromString(credit)
+			p.SEPRefundCNY = full.Mul(decimal.NewFromFloat(amt)).Div(decimal.NewFromFloat(o.Amount)).Round(6).StringFixed(6)
+			p.DeductionType = payment.DeductionTypeBalance
+			p.BalanceToDeduct = amt
+			return p, nil, nil
+		}
+	}
 	if deduct {
 		if er := s.prepDeduct(ctx, o, p, force); er != nil {
 			return nil, er, nil
@@ -291,7 +312,13 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
 		// Skip balance deduction on retry if previous attempt already deducted
 		// but failed to roll back (REFUND_ROLLBACK_FAILED in audit log).
-		if !s.hasAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED") {
+		if p.SEPRefundCNY != "" {
+			_, err := s.userRepo.(SEPAccountAccounting).SEPRefundBalance(ctx, p.OrderID, "deduct", p.SEPRefundCNY)
+			if err != nil {
+				s.restoreStatus(ctx, p)
+				return nil, SEPAdminBalanceError(err)
+			}
+		} else if !s.hasAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED") {
 			if err := s.userRepo.DeductBalance(ctx, p.Order.UserID, p.BalanceToDeduct); err != nil {
 				s.restoreStatus(ctx, p)
 				return nil, fmt.Errorf("deduction: %w", err)
@@ -325,6 +352,9 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 	}
 	resp, err := s.gwRefund(ctx, p)
 	if err != nil {
+		if p.SEPRefundCNY != "" {
+			return s.sepRefundUnconfirmed(ctx, p, err)
+		}
 		return s.handleGwFail(ctx, p, err)
 	}
 	return s.finishRefund(ctx, p, resp)
@@ -389,10 +419,18 @@ func validateRefundProviderResponse(resp *payment.RefundResponse) error {
 
 func (s *PaymentService) finishRefund(ctx context.Context, p *RefundPlan, resp *payment.RefundResponse) (*RefundResult, error) {
 	if err := validateRefundProviderResponse(resp); err != nil {
+		if p.SEPRefundCNY != "" {
+			return s.sepRefundUnconfirmed(ctx, p, err)
+		}
 		return s.handleGwFail(ctx, p, err)
 	}
 	switch strings.TrimSpace(resp.Status) {
 	case payment.ProviderStatusSuccess, payment.ProviderStatusRefunded:
+		if accounting, ok := s.userRepo.(SEPAccountAccounting); ok {
+			if _, err := accounting.SEPRefundBalance(ctx, p.OrderID, "complete", ""); err != nil {
+				return nil, SEPAdminBalanceError(err)
+			}
+		}
 		return s.markRefundOk(ctx, p)
 	case payment.ProviderStatusPending:
 		return s.markRefundPending(ctx, p, resp)
@@ -483,6 +521,25 @@ func (s *PaymentService) refundFinalizePlan(o *dbent.PaymentOrder) *RefundPlan {
 }
 
 func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *RefundPlan) error {
+	if accounting, ok := s.userRepo.(SEPAccountAccounting); ok && p.Order.OrderType == payment.OrderTypeBalance {
+		b, err := accounting.SEPAccountBalance(ctx, p.Order.UserID)
+		if err != nil {
+			return SEPAdminBalanceError(err)
+		}
+		if b != nil {
+			credit, _, err := sepOrderCredit(p.Order)
+			if err != nil {
+				return err
+			}
+			full, _ := decimal.NewFromString(credit)
+			amount := full.Mul(decimal.NewFromFloat(p.RefundAmount)).Div(decimal.NewFromFloat(p.Order.Amount)).Round(6).StringFixed(6)
+			if _, err = accounting.SEPRefundBalance(ctx, p.OrderID, "deduct", amount); err != nil {
+				return SEPAdminBalanceError(err)
+			}
+			_, err = accounting.SEPRefundBalance(ctx, p.OrderID, "complete", "")
+			return err
+		}
+	}
 	if s.hasAuditLog(ctx, p.OrderID, "REFUND_SUCCESS") {
 		p.BalanceToDeduct = 0
 		p.SubDaysToDeduct = 0
@@ -508,6 +565,11 @@ func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *Refun
 }
 
 func (s *PaymentService) finalizeRefundFailed(ctx context.Context, o *dbent.PaymentOrder, gErr error) (*RefundResult, error) {
+	if accounting, ok := s.userRepo.(SEPAccountAccounting); ok {
+		if _, err := accounting.SEPRefundBalance(ctx, o.ID, "restore", ""); err != nil {
+			return nil, SEPAdminBalanceError(err)
+		}
+	}
 	now := time.Now()
 	_, _ = s.entClient.PaymentOrder.UpdateOneID(o.ID).SetStatus(OrderStatusRefundFailed).SetFailedAt(now).SetFailedReason(psErrMsg(gErr)).Save(ctx)
 	s.writeAuditLog(ctx, o.ID, "REFUND_FAILED", "admin", map[string]any{"detail": psErrMsg(gErr)})
@@ -575,7 +637,10 @@ func (s *PaymentService) markRefundOk(ctx context.Context, p *RefundPlan) (*Refu
 func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, resp *payment.RefundResponse) (*RefundResult, error) {
 	balanceDeducted := p.BalanceToDeduct
 	subDaysDeducted := p.SubDaysToDeduct
-	rollbackOK := s.RollbackRefund(ctx, p, nil)
+	rollbackOK := false
+	if p.SEPRefundCNY == "" {
+		rollbackOK = s.RollbackRefund(ctx, p, nil)
+	}
 	if rollbackOK {
 		p.BalanceToDeduct = 0
 		p.SubDaysToDeduct = 0
@@ -608,7 +673,9 @@ func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, r
 	s.writeAuditLog(ctx, p.OrderID, "REFUND_PENDING", "admin", detail)
 
 	warning := "gateway refund is pending confirmation"
-	if !rollbackOK {
+	if p.SEPRefundCNY != "" {
+		warning = fmt.Sprintf("支付渠道退款待确认；已保留 %s 元退款扣款，请查询原订单 %d，勿重复申请退款", p.SEPRefundCNY, p.OrderID)
+	} else if !rollbackOK {
 		warning += "; refund deduction rollback failed"
 	}
 	return &RefundResult{Success: false, Warning: warning}, nil
@@ -622,6 +689,16 @@ func refundResponseID(resp *payment.RefundResponse) string {
 }
 
 func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr error) bool {
+	if accounting, ok := s.userRepo.(SEPAccountAccounting); ok && p.DeductionType == payment.DeductionTypeBalance {
+		handled, err := accounting.SEPRefundBalance(ctx, p.OrderID, "restore", "")
+		if handled {
+			if err != nil {
+				s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{"rollbackError": err.Error(), "gatewayError": psErrMsg(gErr)})
+				return false
+			}
+			return true
+		}
+	}
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
 		if err := s.userRepo.UpdateBalance(ctx, p.Order.UserID, p.BalanceToDeduct); err != nil {
 			slog.Error("[CRITICAL] rollback failed", "orderID", p.OrderID, "amount", p.BalanceToDeduct, "error", err)

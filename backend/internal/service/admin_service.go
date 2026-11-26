@@ -308,6 +308,9 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ModelPricesVersion string
+	UpstreamCompanyID  *int64
+	ModelPrices        *[]AccountModelPrice
 	Name               string
 	Notes              *string
 	Platform           string
@@ -339,6 +342,9 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	ModelPricesVersion    string
+	UpstreamCompanyID     *int64
+	ModelPrices           *[]AccountModelPrice
 	Name                  string
 	Notes                 *string
 	Type                  string // Account type: oauth, setup-token, apikey
@@ -377,12 +383,13 @@ type BulkUpdateAccountsInput struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	Platform    string
-	Type        string
-	Status      string
-	Group       string
-	Search      string
-	PrivacyMode string
+	UpstreamCompanyID string
+	Platform          string
+	Type              string
+	Status            string
+	Group             string
+	Search            string
+	PrivacyMode       string
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.

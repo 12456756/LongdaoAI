@@ -164,7 +164,7 @@ func TestCalculateCreateOrderPayAmountUsesCurrencyPrecision(t *testing.T) {
 func TestCalculateCreateOrderPayAmountForSubscriptionConvertsCNYPriceWhenRateConfigured(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "CNY", payment.OrderTypeSubscription, 7.15)
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "CNY", payment.OrderTypeSubscription, "7.15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestCalculateCreateOrderPayAmountForSubscriptionConvertsCNYPriceWhenRateCon
 func TestCalculateCreateOrderPayAmountForSubscriptionAppliesFeeAfterCNYConversion(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 2.5, "CNY", payment.OrderTypeSubscription, 7.15)
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 2.5, "CNY", payment.OrderTypeSubscription, "7.15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestCalculateCreateOrderPayAmountForSubscriptionAppliesFeeAfterCNYConversio
 func TestCalculateCreateOrderPayAmountForSubscriptionKeepsNonCNYPrice(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "USD", payment.OrderTypeSubscription, 7.15)
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "USD", payment.OrderTypeSubscription, "7.15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -197,25 +197,19 @@ func TestCalculateCreateOrderPayAmountForSubscriptionKeepsNonCNYPrice(t *testing
 	}
 }
 
-// 换算是 opt-in：未配置汇率（rate=0）时，CNY 订阅保持 price 直付的存量行为。
-// 该测试锁住存量部署升级后行为不变的兼容承诺。
-func TestCalculateCreateOrderPayAmountForSubscriptionKeepsDirectPriceWhenRateDisabled(t *testing.T) {
+func TestCalculateCreateOrderPayAmountRejectsInvalidRate(t *testing.T) {
 	t.Parallel()
-
-	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "CNY", payment.OrderTypeSubscription, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if amountStr != "9.99" || amount != 9.99 {
-		t.Fatalf("subscription CNY pay amount without rate = (%q, %v), want (9.99, 9.99)", amountStr, amount)
+	_, _, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "CNY", payment.OrderTypeSubscription, "0")
+	if err == nil {
+		t.Fatal("expected invalid exchange rate to fail")
 	}
 }
 
-// 汇率只作用于订阅订单，余额充值订单不受影响。
-func TestCalculateCreateOrderPayAmountForBalanceIgnoresSubscriptionRate(t *testing.T) {
+// Recharge principal is already denominated in the payment currency.
+func TestCalculateCreateOrderPayAmountForBalanceKeepsPaymentPrincipal(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(50, 0, "CNY", payment.OrderTypeBalance, 7.15)
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(50, 0, "CNY", payment.OrderTypeBalance, "7.15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,17 +218,15 @@ func TestCalculateCreateOrderPayAmountForBalanceIgnoresSubscriptionRate(t *testi
 	}
 }
 
-func TestCalculateCreditedBalanceStillUsesRechargeMultiplier(t *testing.T) {
+func TestCreditedBalanceUsesDirectDivisionAndBalancePrecision(t *testing.T) {
 	t.Parallel()
-
-	got := calculateCreditedBalance(10, 0.14)
-	if got != 1.4 {
-		t.Fatalf("credited balance = %v, want 1.4", got)
+	got, err := creditedBalanceForCurrency(10, "7.15", "CNY")
+	if err != nil || got != 1.39860140 {
+		t.Fatalf("credited balance = %v, error = %v, want 1.39860140", got, err)
 	}
-
-	got = calculateCreditedBalance(5, 10)
-	if got != 50 {
-		t.Fatalf("credited balance = %v, want 50", got)
+	got, err = creditedBalanceForCurrency(5, "7.15", "USD")
+	if err != nil || got != 5 {
+		t.Fatalf("credited USD balance = %v, error = %v, want 5", got, err)
 	}
 }
 

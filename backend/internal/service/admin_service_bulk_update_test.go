@@ -32,6 +32,8 @@ type accountRepoStubForBulkUpdate struct {
 	listErr          error
 	listCalled       bool
 	lastListParams   pagination.PaginationParams
+	lastCompanyID    int64
+	lastCompanySet   bool
 	lastListFilters  struct {
 		platform    string
 		accountType string
@@ -92,7 +94,8 @@ func (s *accountRepoStubForBulkUpdate) ListAllWithFilters(context.Context, strin
 	return nil, nil
 }
 
-func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStubForBulkUpdate) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+	s.lastCompanyID, s.lastCompanySet = UpstreamCompanyFilter(ctx)
 	s.listCalled = true
 	s.lastListParams = params
 	s.lastListFilters.platform = platform
@@ -229,6 +232,7 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 
 	filtersValue := reflect.New(filtersField.Type().Elem())
 	filtersValue.Elem().FieldByName("Platform").SetString(PlatformOpenAI)
+	filtersValue.Elem().FieldByName("UpstreamCompanyID").SetString("9")
 	filtersValue.Elem().FieldByName("Type").SetString(AccountTypeOAuth)
 	filtersValue.Elem().FieldByName("Status").SetString(StatusActive)
 	filtersValue.Elem().FieldByName("Group").SetString("12")
@@ -240,6 +244,8 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, repo.listCalled, "expected filter-target bulk update to resolve matching IDs via account list filters")
 	require.Equal(t, PlatformOpenAI, repo.lastListFilters.platform)
+	require.True(t, repo.lastCompanySet)
+	require.EqualValues(t, 9, repo.lastCompanyID)
 	require.Equal(t, AccountTypeOAuth, repo.lastListFilters.accountType)
 	require.Equal(t, StatusActive, repo.lastListFilters.status)
 	require.Equal(t, "bulk-target", repo.lastListFilters.search)

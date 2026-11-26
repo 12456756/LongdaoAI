@@ -49,9 +49,9 @@ function mountDialog(paymentConfig: Record<string, unknown> | null) {
 }
 
 describe('PlanEditDialog subscription CNY payment preview', () => {
-  it('shows CNY channel charge using the configured subscription rate and fee', async () => {
+  it('shows CNY channel charge using the platform rate and fee', async () => {
     const wrapper = mountDialog({
-      subscription_usd_to_cny_rate: 7.15,
+      platform_usd_to_cny_rate: "7.15",
       recharge_fee_rate: 2.5,
     })
 
@@ -63,11 +63,8 @@ describe('PlanEditDialog subscription CNY payment preview', () => {
     expect(wrapper.text()).toContain('¥73.22')
   })
 
-  it('hides the preview when the subscription rate is not configured', async () => {
-    const wrapper = mountDialog({
-      subscription_usd_to_cny_rate: 0,
-      recharge_fee_rate: 2.5,
-    })
+  it('hides the preview when payment configuration is unavailable', async () => {
+    const wrapper = mountDialog(null)
 
     await wrapper.find('input[type="number"]').setValue('9.99')
 

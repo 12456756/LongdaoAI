@@ -507,13 +507,12 @@ const (
 	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（USD）
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
 
-	// SettingKeyBalanceDisplayCnyRate 余额显示汇率（1 USD 显示为多少 CNY）。
-	// 仅用于用户端展示层：显示金额 = 美元余额 × 该汇率。不参与任何计费/扣费/充值换算，
-	// 存储与计费始终以美元为本位。默认 7.15。
-	SettingKeyBalanceDisplayCnyRate = "balance_display_cny_rate"
+	// SettingKeyPlatformUSDToCNYRate is the shared rate for CNY payments and display.
+	// Internal balances and model prices remain denominated in USD.
+	SettingKeyPlatformUSDToCNYRate = "platform_usd_to_cny_rate"
 
-	// DefaultBalanceDisplayCnyRate 余额显示汇率默认值（1 USD = 7.15 CNY 展示）。
-	DefaultBalanceDisplayCnyRate = 7.15
+	// DefaultPlatformUSDToCNYRate means 1 USD = 7.15 CNY.
+	DefaultPlatformUSDToCNYRate = "7.15"
 
 	// 订阅到期提醒
 	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled" // 订阅到期提醒全局开关，默认开启

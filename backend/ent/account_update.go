@@ -57,6 +57,33 @@ func (_u *AccountUpdate) ClearDeletedAt() *AccountUpdate {
 	return _u
 }
 
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (_u *AccountUpdate) SetUpstreamCompanyID(v int64) *AccountUpdate {
+	_u.mutation.ResetUpstreamCompanyID()
+	_u.mutation.SetUpstreamCompanyID(v)
+	return _u
+}
+
+// SetNillableUpstreamCompanyID sets the "upstream_company_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableUpstreamCompanyID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetUpstreamCompanyID(*v)
+	}
+	return _u
+}
+
+// AddUpstreamCompanyID adds value to the "upstream_company_id" field.
+func (_u *AccountUpdate) AddUpstreamCompanyID(v int64) *AccountUpdate {
+	_u.mutation.AddUpstreamCompanyID(v)
+	return _u
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (_u *AccountUpdate) ClearUpstreamCompanyID() *AccountUpdate {
+	_u.mutation.ClearUpstreamCompanyID()
+	return _u
+}
+
 // SetName sets the "name" field.
 func (_u *AccountUpdate) SetName(v string) *AccountUpdate {
 	_u.mutation.SetName(v)
@@ -811,6 +838,15 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(account.FieldDeletedAt, field.TypeTime)
 	}
+	if value, ok := _u.mutation.UpstreamCompanyID(); ok {
+		_spec.SetField(account.FieldUpstreamCompanyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedUpstreamCompanyID(); ok {
+		_spec.AddField(account.FieldUpstreamCompanyID, field.TypeInt64, value)
+	}
+	if _u.mutation.UpstreamCompanyIDCleared() {
+		_spec.ClearField(account.FieldUpstreamCompanyID, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)
 	}
@@ -1194,6 +1230,33 @@ func (_u *AccountUpdateOne) SetNillableDeletedAt(v *time.Time) *AccountUpdateOne
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *AccountUpdateOne) ClearDeletedAt() *AccountUpdateOne {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (_u *AccountUpdateOne) SetUpstreamCompanyID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetUpstreamCompanyID()
+	_u.mutation.SetUpstreamCompanyID(v)
+	return _u
+}
+
+// SetNillableUpstreamCompanyID sets the "upstream_company_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableUpstreamCompanyID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetUpstreamCompanyID(*v)
+	}
+	return _u
+}
+
+// AddUpstreamCompanyID adds value to the "upstream_company_id" field.
+func (_u *AccountUpdateOne) AddUpstreamCompanyID(v int64) *AccountUpdateOne {
+	_u.mutation.AddUpstreamCompanyID(v)
+	return _u
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (_u *AccountUpdateOne) ClearUpstreamCompanyID() *AccountUpdateOne {
+	_u.mutation.ClearUpstreamCompanyID()
 	return _u
 }
 
@@ -1980,6 +2043,15 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(account.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.UpstreamCompanyID(); ok {
+		_spec.SetField(account.FieldUpstreamCompanyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedUpstreamCompanyID(); ok {
+		_spec.AddField(account.FieldUpstreamCompanyID, field.TypeInt64, value)
+	}
+	if _u.mutation.UpstreamCompanyIDCleared() {
+		_spec.ClearField(account.FieldUpstreamCompanyID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)

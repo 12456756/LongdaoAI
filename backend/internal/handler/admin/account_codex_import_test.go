@@ -581,6 +581,21 @@ func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwo
 	}
 }
 
+func TestImportCodexSessionsIncludesModelPricesInAccountTransaction(t *testing.T) {
+	svc := newCodexImportMemoryAdminService(nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	company := int64(7)
+	prices := []service.AccountModelPrice{{Model: "custom", Mode: service.BillingModeToken, Discount: "0.5", Markup: "2", Items: []service.ModelPriceItem{{Kind: "input", Unit: "USD/MTok", Amount: "2"}, {Kind: "output", Unit: "USD/MTok", Amount: "8"}}}}
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true), UpstreamCompanyID: &company, ModelPrices: &prices}
+	result, err := handler.importCodexSessions(context.Background(), req, []codexImportEntry{{Index: 1, Value: buildCodexAccessOnlyImportValue(t, "workspace-pricing", "user-pricing")}})
+	if err != nil || result.Created != 1 {
+		t.Fatalf("import failed: result=%+v error=%v", result, err)
+	}
+	if len(svc.createdAccounts) != 1 || svc.createdAccounts[0].ModelPrices == nil || svc.createdAccounts[0].UpstreamCompanyID == nil || *svc.createdAccounts[0].UpstreamCompanyID != company {
+		t.Fatal("account pricing was not passed to the create transaction")
+	}
+}
+
 func TestImportCodexSessionsAccessTokenOnlySameWorkspaceAndUserDifferentTokensCreatesTwoAccounts(t *testing.T) {
 	svc := newCodexImportMemoryAdminService(nil)
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)

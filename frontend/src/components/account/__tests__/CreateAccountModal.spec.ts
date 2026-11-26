@@ -2,6 +2,11 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('@/api/admin/modelPricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/admin/modelPricing')>(),
+  modelPricingAPI: { companies: vi.fn().mockResolvedValue([]), exchangeRate: vi.fn().mockResolvedValue({ usd_to_cny_rate: '7.15' }) }
+}))
+
 const {
   createAccountMock,
   importCodexSessionMock,
@@ -43,7 +48,9 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([]),
+  getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue(Object.fromEntries(
+    Array.from({ length: 24 }, (_, i) => [`ag-model-${i}`, `ag-upstream-${i}`])
+  )),
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -55,6 +62,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import AccountModelPricingEditor from '../AccountModelPricingEditor.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -146,6 +154,22 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       warnings: [],
     })
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+  })
+
+  it('quotes only the current 66 whitelist models after reopening and switching platforms', async () => {
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: false })
+    await flushPromises()
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    const whitelist = Array.from({ length: 66 }, (_, i) => `upstream-model-${i}`)
+    wrapper.findComponent({ name: 'ModelWhitelistSelector' }).vm.$emit('update:modelValue', whitelist)
+    await flushPromises()
+    const pricing = wrapper.findComponent(AccountModelPricingEditor)
+    expect(pricing.props('modelValue').prices.map(price => price.model)).toEqual(whitelist)
+    expect(pricing.findAll('.quote-model')).toHaveLength(66)
+    expect(pricing.text()).toContain('白名单模型 66 个')
   })
 
   it('sends false explicitly for normal OpenAI account creation by default', async () => {

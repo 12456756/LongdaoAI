@@ -16,13 +16,14 @@ import (
 // VideoBillingQuote is a customer charge for one video, not a provider rate card.
 // Mode video means per-second pricing; per_request does not multiply duration.
 type VideoBillingQuote struct {
-	Diagnostic string
-	Mode       BillingMode
-	Source     string
-	Amount     *string
-	Multiplier float64
-	cost       *CostBreakdown
-	mapping    ChannelMappingResult
+	managedBase bool
+	Diagnostic  string
+	Mode        BillingMode
+	Source      string
+	Amount      *string
+	Multiplier  float64
+	cost        *CostBreakdown
+	mapping     ChannelMappingResult
 }
 
 var ErrVideoPricingChanged = errors.New("video pricing changed; obtain a new quote")
@@ -30,6 +31,7 @@ var ErrVideoPricingChanged = errors.New("video pricing changed; obtain a new quo
 // FrozenVideoBilling is created only by server-side pre-dispatch verification.
 // Its private value copy survives administrator changes during upstream I/O.
 type FrozenVideoBilling struct {
+	managedBase            bool
 	keyID, userID, groupID int64
 	model                  string
 	multiplier             float64
@@ -40,6 +42,9 @@ type FrozenVideoBilling struct {
 func (f *FrozenVideoBilling) Mapping() ChannelMappingResult { return f.mapping }
 
 func (f *FrozenVideoBilling) MatchesAccount(account *Account) bool {
+	if f != nil && f.managedBase {
+		return account != nil
+	}
 	return f != nil && account != nil && resolveOpenAIForwardModel(account, f.model, f.mapping.MappedModel) == f.mapping.MappedModel
 }
 
@@ -98,7 +103,7 @@ func (s *OpenAIGatewayService) PrepareVideoBilling(ctx context.Context, key *API
 		return nil, fmt.Errorf("Video pricing version no longer matches the current quote: %w", ErrVideoPricingChanged)
 	}
 	return &FrozenVideoBilling{keyID: key.ID, userID: key.UserID, groupID: *key.GroupID,
-		model: request.Model, multiplier: quote.Multiplier, cost: *quote.cost, mapping: quote.mapping}, nil
+		model: request.Model, multiplier: quote.Multiplier, cost: *quote.cost, mapping: quote.mapping, managedBase: quote.managedBase}, nil
 }
 
 func (f *FrozenVideoBilling) recordCost(input *OpenAIRecordUsageInput) (*CostBreakdown, error) {
@@ -125,6 +130,29 @@ func (s *OpenAIGatewayService) QuoteVideoBilling(ctx context.Context, key *APIKe
 		return nil, errors.New("video billing is unavailable")
 	}
 	// Quotes and dispatch checks read current configuration, not auth/rate caches.
+	if s.billingService.UsesManagedBasePrices() {
+		base := s.ResolveUserGroupRateMultiplier(ctx, key.UserID, *key.GroupID, key.Group.RateMultiplier)
+		p, err := s.billingService.BasePrice(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		quote := &VideoBillingQuote{managedBase: true, Mode: p.Price.Mode, Source: p.String(), Multiplier: resolveVideoRateMultiplier(key, base), mapping: ChannelMappingResult{MappedModel: model, BillingModelSource: BillingModelSourceRequested}}
+		if s.channelService != nil {
+			quote.mapping = s.channelService.ResolveChannelMapping(ctx, *key.GroupID, model)
+		}
+		if p.Price.Mode == BillingModeToken {
+			return quote, nil
+		}
+		cost, err := s.billingService.CalculateBasePrice(WithBasePriceSnapshot(ctx, p), model, resolution, UsageTokens{}, 1, durationSeconds, quote.Multiplier, "")
+		if err != nil {
+			return nil, err
+		}
+		cost.BillingMode = string(BillingModeVideo)
+		quote.cost = cost
+		amount := BillingUSDString(cost.ActualCost)
+		quote.Amount = &amount
+		return quote, nil
+	}
 	// Use a private channel snapshot so mapping and cost resolve against one view.
 	view := &OpenAIGatewayService{billingService: s.billingService, channelService: s.channelService, resolver: s.resolver}
 	if s.channelService != nil && s.channelService.groupRepo != nil {

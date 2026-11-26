@@ -76,7 +76,7 @@ export function formatCurrency(amount: number | null | undefined, currency: stri
 
 /**
  * 余额显示汇率默认值（1 USD 展示为多少 CNY）。
- * 与后端 service.DefaultBalanceDisplayCnyRate 保持一致，作为读取公开设置失败时的兜底。
+ * 与后端 service.DefaultPlatformUSDToCNYRate 保持一致，作为读取公开设置失败时的兜底。
  */
 export const DEFAULT_BALANCE_DISPLAY_CNY_RATE = 7.15
 

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -163,6 +164,32 @@ func (r *OpenAIVideoRequest) ModerationBody() []byte {
 
 // Unknown providers have no reliable default rate card; require administrator pricing.
 func (s *OpenAIGatewayService) CheckVideoPricing(ctx context.Context, apiKey *APIKey, account *Account, model, mappedModel, resolution string) error {
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		return nil
+	}
+	if s.billingService.UsesManagedBasePrices() {
+		p, err := s.billingService.BasePrice(ctx, model)
+		if err != nil {
+			return err
+		}
+		if p.Price.Mode == BillingModeToken {
+			return nil
+		}
+		kind := "video"
+		tier := resolution
+		if p.Price.Mode == BillingModePerRequest {
+			kind = "request"
+		}
+		if _, ok := p.Rate(kind, tier); ok {
+			return nil
+		}
+		if kind == "request" {
+			if _, ok := p.Rate(kind, ""); ok {
+				return nil
+			}
+		}
+		return missingPriceItem(model, resolution)
+	}
 	model = resolveOpenAIForwardModel(account, model, mappedModel)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		return nil
@@ -196,6 +223,15 @@ func videoTaskCacheKey(apiKeyID int64, taskID string) string {
 }
 
 func (s *OpenAIGatewayService) GetVideoTaskAccount(ctx context.Context, apiKey *APIKey, taskID string) (*Account, error) {
+	if apiKey != nil && apiKey.SEP != nil {
+		_, id, err := apiKey.SEP.Service.RestoreTaskGroup(ctx, apiKey, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if id > 0 {
+			return s.accountRepo.GetByID(ctx, id)
+		}
+	}
 	if s.cache == nil || apiKey == nil {
 		return nil, errors.New("video task storage is unavailable")
 	}
@@ -376,6 +412,11 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, err
 	}
+	if request == nil && apiKey.SEP != nil {
+		if err = apiKey.SEP.Service.ObserveVideo(ctx, apiKey, taskID, responseBody); err != nil {
+			return nil, err
+		}
+	}
 	result := &OpenAIForwardResult{RequestID: firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("x-oneapi-request-id")), Model: originalModel, BillingModel: billingModel, UpstreamModel: billingModel, Duration: time.Since(start)}
 	if request != nil {
 		result.ResponseID = firstNonEmptyString(gjson.GetBytes(responseBody, "id").String(), gjson.GetBytes(responseBody, "request_id").String(), gjson.GetBytes(responseBody, "data.id").String())
@@ -396,6 +437,11 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 			logger.LegacyPrintf("service.openai_gateway", "bind video task account failed: account_id=%d task_id=%s err=%v", account.ID, result.ResponseID, err)
 		}
 		result.VideoCount = 1
+		if apiKey.SEP != nil {
+			if err = apiKey.SEP.Service.RecordExecutionProvider(ctx, apiKey, result.RequestID, result.ResponseID); err != nil {
+				return nil, err
+			}
+		}
 		if store, storeErr := s.videoStore(); storeErr == nil {
 			now := time.Now().Unix()
 			meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: result.ResponseID, APIKeyID: apiKey.ID, GroupID: derefGroupID(apiKey.GroupID), AccountID: account.ID, Protocol: VideoProtocolOpenAI, RequestedModel: originalModel, UpstreamModel: billingModel, BillingRequestID: resolveUsageBillingRequestID(ctx, result.RequestID), BoundAt: now, ExpiresAt: now + 604800}
@@ -417,4 +463,20 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	}
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, responseBody, s.responseHeaderFilter)
 	return result, nil
+}
+
+func (s *OpenAIGatewayService) RefreshSEPVideo(ctx context.Context, key *APIKey, taskID string) error {
+	var err error
+	key, _, err = key.SEP.Service.RestoreTaskGroup(ctx, key, taskID)
+	if err != nil {
+		return err
+	}
+	account, err := s.GetVideoTaskAccount(ctx, key, taskID)
+	if err != nil {
+		return err
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request, _ = http.NewRequestWithContext(ctx, http.MethodGet, "/v1/videos/"+taskID, nil)
+	_, err = s.ForwardVideo(ctx, c, account, key, nil, taskID, false, "")
+	return err
 }

@@ -488,7 +488,7 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, platform_usd_to_cny_rate: "7.15", recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -498,13 +498,12 @@ const tabs = computed(() => {
   return result
 })
 
-const visibleMethods = computed(() => getVisibleMethods(checkout.value.methods))
+const visibleMethods = computed(() => Object.fromEntries(Object.entries(getVisibleMethods(checkout.value.methods)).filter(([, method]) => ["CNY", "USD"].includes(normalizePaymentCurrency(method.currency)))))
 const enabledMethods = computed(() => Object.keys(visibleMethods.value))
 const validAmount = computed(() => amount.value ?? 0)
-// 订阅 CNY 换算汇率（1 USD = X CNY）。0 = 未配置，订阅保持 price 直付（与后端 opt-in 条件严格镜像）。
-const subscriptionUsdToCnyRate = computed(() => {
-  const rate = checkout.value.subscription_usd_to_cny_rate
-  return Number.isFinite(rate) && rate > 0 ? rate : 0
+const platformExchangeRate = computed(() => {
+  const rate = Number(checkout.value.platform_usd_to_cny_rate)
+  return Number.isFinite(rate) && rate > 0 ? rate : NaN
 })
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
@@ -574,8 +573,8 @@ function ceilPaymentAmount(value: number, currency: string): number {
 }
 
 function subscriptionPaymentAmountForCurrency(value: number, currency: string): number {
-  const rate = subscriptionUsdToCnyRate.value
-  if (rate <= 0 || currency !== DEFAULT_PAYMENT_CURRENCY) return roundPaymentAmount(value, currency)
+  const rate = platformExchangeRate.value
+  if (currency !== DEFAULT_PAYMENT_CURRENCY) return roundPaymentAmount(value, currency)
   return roundPaymentAmount(value * rate, currency)
 }
 

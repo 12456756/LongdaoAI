@@ -36,6 +36,7 @@ export async function list(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    upstream_company_id?: string
     platform?: string
     type?: string
     status?: string
@@ -72,6 +73,7 @@ export async function listWithEtag(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    upstream_company_id?: string
     platform?: string
     type?: string
     status?: string
@@ -633,6 +635,7 @@ export async function syncFromCrs(params: {
 export async function exportData(options?: {
   ids?: number[]
   filters?: {
+    upstream_company_id?: string
     platform?: string
     type?: string
     status?: string
@@ -648,7 +651,8 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
+    const { upstream_company_id, platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
+    if (upstream_company_id) params.upstream_company_id = upstream_company_id
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status

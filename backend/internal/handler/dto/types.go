@@ -6,22 +6,25 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type User struct {
-	ID            int64      `json:"id"`
-	Email         string     `json:"email"`
-	Username      string     `json:"username"`
-	Role          string     `json:"role"`
-	Balance       float64    `json:"balance"`
-	FrozenBalance float64    `json:"frozen_balance"`
-	Concurrency   int        `json:"concurrency"`
-	Status        string     `json:"status"`
-	AllowedGroups []int64    `json:"allowed_groups"`
-	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	ID                int64                      `json:"id"`
+	Email             string                     `json:"email"`
+	Username          string                     `json:"username"`
+	Role              string                     `json:"role"`
+	Balance           float64                    `json:"balance"`
+	SEPBalance        *service.SEPAccountBalance `json:"sep_balance,omitempty"`
+	SEPBalanceReceipt *service.SEPBalanceReceipt `json:"sep_balance_receipt,omitempty"`
+	FrozenBalance     float64                    `json:"frozen_balance"`
+	Concurrency       int                        `json:"concurrency"`
+	Status            string                     `json:"status"`
+	AllowedGroups     []int64                    `json:"allowed_groups"`
+	LastActiveAt      *time.Time                 `json:"last_active_at,omitempty"`
+	CreatedAt         time.Time                  `json:"created_at"`
+	UpdatedAt         time.Time                  `json:"updated_at"`
+	DeletedAt         *time.Time                 `json:"deleted_at,omitempty"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -172,11 +175,13 @@ type AdminGroup struct {
 }
 
 type Account struct {
-	ID       int64   `json:"id"`
-	Name     string  `json:"name"`
-	Notes    *string `json:"notes"`
-	Platform string  `json:"platform"`
-	Type     string  `json:"type"`
+	UpstreamCompanyID *int64                      `json:"upstream_company_id"`
+	ModelPrices       []service.AccountModelPrice `json:"model_prices,omitempty"`
+	ID                int64                       `json:"id"`
+	Name              string                      `json:"name"`
+	Notes             *string                     `json:"notes"`
+	Platform          string                      `json:"platform"`
+	Type              string                      `json:"type"`
 	// Credentials 经 RedactCredentials 处理后只含非敏感子键；敏感 token / api_key / 私钥
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。
 	Credentials             map[string]any  `json:"credentials"`

@@ -86,6 +86,8 @@ export interface User {
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
   balance: number // User balance for API usage
+  sep_balance?: { enterprise_id: string; available_paid_cny: string; frozen_paid_cny: string; exchange_rate: string }
+  sep_balance_receipt?: { business_ref: string; event_id: string; sync_status: string; committed: boolean; available_paid_cny: string }
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
   rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
@@ -235,9 +237,9 @@ export interface PublicSettings {
   balance_low_notify_enabled: boolean
   account_quota_notify_enabled: boolean
   balance_low_notify_threshold: number
-  // 余额显示汇率（1 USD 展示为多少 CNY）。仅用户端展示层使用，不参与计费。
+  // Shared platform USD-to-CNY rate, stored as a decimal string.
   // 可选：注入的 __APP_CONFIG__ 旧缓存可能缺失，读取时按默认值兜底。
-  balance_display_cny_rate?: number
+  platform_usd_to_cny_rate?: string
   channel_monitor_enabled: boolean
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
@@ -911,6 +913,9 @@ export interface UpstreamBillingProbeResult {
 }
 
 export interface Account {
+  upstream_company_id?: number | null
+  model_prices_version?: string
+  model_prices?: import('@/api/admin/modelPricing').ModelPrice[]
   id: number
   name: string
   notes?: string | null
@@ -1195,6 +1200,9 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  upstream_company_id?: number
+  model_prices_version?: string
+  model_prices?: import('@/api/admin/modelPricing').ModelPrice[]
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1213,6 +1221,9 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
+  upstream_company_id?: number
+  model_prices_version?: string
+  model_prices?: import('@/api/admin/modelPricing').ModelPrice[]
   name?: string
   notes?: string | null
   type?: AccountType
@@ -1331,6 +1342,9 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
+	upstream_company_id?: number
+	model_prices?: import('@/api/admin/modelPricing').ModelPrice[]
+	model_prices_version?: string
   content?: string
   contents?: string[]
   name?: string
@@ -1351,6 +1365,9 @@ export interface CodexSessionImportRequest {
 }
 
 export interface OpenAICodexPATCreateRequest {
+	upstream_company_id?: number
+	model_prices?: import('@/api/admin/modelPricing').ModelPrice[]
+	model_prices_version?: string
   access_token: string
   name?: string
   notes?: string | null

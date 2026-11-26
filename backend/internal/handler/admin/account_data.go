@@ -536,6 +536,13 @@ func (h *AccountHandler) resolveExportAccounts(ctx context.Context, ids []int64,
 		return out, nil
 	}
 
+	if raw := c.Query("upstream_company_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			return nil, infraerrors.BadRequest("invalid_upstream_company", "上游公司筛选编号无效")
+		}
+		ctx = service.WithUpstreamCompanyFilter(ctx, id)
+	}
 	platform := c.Query("platform")
 	accountType := c.Query("type")
 	status := c.Query("status")
