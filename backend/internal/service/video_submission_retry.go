@@ -103,6 +103,16 @@ func (s *OpenAIGatewayService) closedVideoSubmissionBilling(ctx context.Context,
 		if !ok {
 			return billingProblem(errors.New("Video billing outcome repository is unavailable"))
 		}
+		if sub.Billing != nil && sub.Billing.SEPComputeRequestID != "" {
+			restored, err := restoreSEPMediaBillingKey(ctx, key, sub.Billing.SEPComputeRequestID, sub.BillingRequestID)
+			if err != nil {
+				return billingProblem(err)
+			}
+			if err = restored.SEP.Service.FinalizeUnchargedMedia(ctx, restored, "failed", true, sub.SemanticSHA256); err != nil {
+				return billingProblem(err)
+			}
+			return s.VideoRequestBillingStatus(ctx, restored, sub.RequestID)
+		}
 		row, err := repo.CloseVideoBillingWithoutCharge(ctx, key.ID, key.UserID, sub.BillingRequestID)
 		if err != nil {
 			return billingProblem(err)

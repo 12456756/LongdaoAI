@@ -1,0 +1,641 @@
+{
+  "checked_at": "2026-11-24T08:09:00.865Z",
+  "current_base_count": 10,
+  "historical_bill_count": 26,
+  "quote_count": 9,
+  "generation_requests": 0,
+  "existing_balances_and_prices_unchanged": true,
+  "bases": [
+    {
+      "model": "gpt-5.6-luna",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "0.072"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "0.432"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.0072"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "0.09"
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "1.8"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "10.8"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.18"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "2.25"
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "0.72"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "4.32"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.072"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "0.9"
+        }
+      ]
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "0.72"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "3.6"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.036"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "0.9"
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-astra",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "3.6"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "18"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.36"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "4.5"
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-luna",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "0.036"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "0.18"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.0036"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "0.045"
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-sol",
+      "version": 1,
+      "mode": "token",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "input",
+          "tier": "",
+          "effective_usd": "0.72"
+        },
+        {
+          "kind": "output",
+          "tier": "",
+          "effective_usd": "3.6"
+        },
+        {
+          "kind": "cache_read",
+          "tier": "",
+          "effective_usd": "0.072"
+        },
+        {
+          "kind": "cache_write",
+          "tier": "",
+          "effective_usd": "0.9"
+        }
+      ]
+    },
+    {
+      "model": "gpt-image-2-1k",
+      "version": 1,
+      "mode": "image",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "image",
+          "tier": "1K",
+          "effective_usd": "0.3"
+        },
+        {
+          "kind": "image",
+          "tier": "2K",
+          "effective_usd": "0.3"
+        },
+        {
+          "kind": "image",
+          "tier": "4K",
+          "effective_usd": "0.3"
+        }
+      ]
+    },
+    {
+      "model": "gpt-image-2-2k",
+      "version": 1,
+      "mode": "image",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "image",
+          "tier": "1K",
+          "effective_usd": "0.6"
+        },
+        {
+          "kind": "image",
+          "tier": "2K",
+          "effective_usd": "0.6"
+        },
+        {
+          "kind": "image",
+          "tier": "4K",
+          "effective_usd": "0.6"
+        }
+      ]
+    },
+    {
+      "model": "seedance-2.0",
+      "version": 1,
+      "mode": "video",
+      "status": "passed",
+      "items": [
+        {
+          "kind": "video",
+          "tier": "480p",
+          "effective_usd": "0.462"
+        },
+        {
+          "kind": "video",
+          "tier": "720p",
+          "effective_usd": "1"
+        },
+        {
+          "kind": "video",
+          "tier": "1080p",
+          "effective_usd": "2.5"
+        }
+      ]
+    }
+  ],
+  "bills": [
+    {
+      "id": 178,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 179,
+      "model": "gpt-5.6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000267581",
+      "recomputed_usd": "0.0000267581",
+      "status": "passed"
+    },
+    {
+      "id": 180,
+      "model": "gpt-5.6-sol",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0006689520",
+      "recomputed_usd": "0.0006689520",
+      "status": "passed"
+    },
+    {
+      "id": 181,
+      "model": "gpt-5.6-terra",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0004168800",
+      "recomputed_usd": "0.0004168800",
+      "status": "passed"
+    },
+    {
+      "id": 182,
+      "model": "gpt-6.1-sol",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0001741824",
+      "recomputed_usd": "0.0001741824",
+      "status": "passed"
+    },
+    {
+      "id": 183,
+      "model": "gpt-6-astra",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0013271040",
+      "recomputed_usd": "0.0013271040",
+      "status": "passed"
+    },
+    {
+      "id": 184,
+      "model": "gpt-6-sol",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0002654208",
+      "recomputed_usd": "0.0002654208",
+      "status": "passed"
+    },
+    {
+      "id": 185,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.2100000000",
+      "recomputed_usd": "0.2100000000",
+      "status": "passed"
+    },
+    {
+      "id": 186,
+      "model": "gpt-image-2-2k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.4200000000",
+      "recomputed_usd": "0.4200000000",
+      "status": "passed"
+    },
+    {
+      "id": 187,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000133142",
+      "recomputed_usd": "0.0000133142",
+      "status": "passed"
+    },
+    {
+      "id": 188,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 189,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.4200000000",
+      "recomputed_usd": "0.4200000000",
+      "status": "passed"
+    },
+    {
+      "id": 190,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.2100000000",
+      "recomputed_usd": "0.2100000000",
+      "status": "passed"
+    },
+    {
+      "id": 191,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 192,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 193,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.2100000000",
+      "recomputed_usd": "0.2100000000",
+      "status": "passed"
+    },
+    {
+      "id": 194,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.2100000000",
+      "recomputed_usd": "0.2100000000",
+      "status": "passed"
+    },
+    {
+      "id": 195,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 196,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 197,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132494",
+      "recomputed_usd": "0.0000132494",
+      "status": "passed"
+    },
+    {
+      "id": 198,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 199,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 200,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132710",
+      "recomputed_usd": "0.0000132710",
+      "status": "passed"
+    },
+    {
+      "id": 201,
+      "model": "gpt-image-2-1k",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.2100000000",
+      "recomputed_usd": "0.2100000000",
+      "status": "passed"
+    },
+    {
+      "id": 202,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132494",
+      "recomputed_usd": "0.0000132494",
+      "status": "passed"
+    },
+    {
+      "id": 203,
+      "model": "gpt-6-luna",
+      "snapshot_version": 1,
+      "current_version": 1,
+      "current_price_matches_snapshot": true,
+      "actual_usd": "0.0000132494",
+      "recomputed_usd": "0.0000132494",
+      "status": "passed"
+    }
+  ],
+  "quotes": [
+    {
+      "model": "gpt-image-2-1k",
+      "tier": "1K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-1k:v1",
+      "actual_cny": "1.501500",
+      "recomputed_cny": "1.501500",
+      "recomputed_usd": "0.210000000000",
+      "status": "passed"
+    },
+    {
+      "model": "gpt-image-2-1k",
+      "tier": "2K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-1k:v1",
+      "actual_cny": "1.501500",
+      "recomputed_cny": "1.501500",
+      "recomputed_usd": "0.210000000000",
+      "status": "passed"
+    },
+    {
+      "model": "gpt-image-2-1k",
+      "tier": "4K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-1k:v1",
+      "actual_cny": "1.501500",
+      "recomputed_cny": "1.501500",
+      "recomputed_usd": "0.210000000000",
+      "status": "passed"
+    },
+    {
+      "model": "gpt-image-2-2k",
+      "tier": "1K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-2k:v1",
+      "actual_cny": "3.003000",
+      "recomputed_cny": "3.003000",
+      "recomputed_usd": "0.420000000000",
+      "status": "passed"
+    },
+    {
+      "model": "gpt-image-2-2k",
+      "tier": "2K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-2k:v1",
+      "actual_cny": "3.003000",
+      "recomputed_cny": "3.003000",
+      "recomputed_usd": "0.420000000000",
+      "status": "passed"
+    },
+    {
+      "model": "gpt-image-2-2k",
+      "tier": "4K",
+      "count": 1,
+      "multiplier": 0.7,
+      "source": "gpt-image-2-2k:v1",
+      "actual_cny": "3.003000",
+      "recomputed_cny": "3.003000",
+      "recomputed_usd": "0.420000000000",
+      "status": "passed"
+    },
+    {
+      "model": "seedance-2.0",
+      "tier": "480p",
+      "count": 1,
+      "seconds": 4,
+      "multiplier": 0.8,
+      "source": "seedance-2.0:v1",
+      "actual_cny": "10.570560",
+      "recomputed_cny": "10.570560",
+      "recomputed_usd": "1.478400000000",
+      "status": "passed"
+    },
+    {
+      "model": "seedance-2.0",
+      "tier": "720p",
+      "count": 1,
+      "seconds": 4,
+      "multiplier": 0.8,
+      "source": "seedance-2.0:v1",
+      "actual_cny": "22.880000",
+      "recomputed_cny": "22.880000",
+      "recomputed_usd": "3.200000000000",
+      "status": "passed"
+    },
+    {
+      "model": "seedance-2.0",
+      "tier": "1080p",
+      "count": 1,
+      "seconds": 4,
+      "multiplier": 0.8,
+      "source": "seedance-2.0:v1",
+      "actual_cny": "57.200000",
+      "recomputed_cny": "57.200000",
+      "recomputed_usd": "8.000000000000",
+      "status": "passed"
+    }
+  ]
+}

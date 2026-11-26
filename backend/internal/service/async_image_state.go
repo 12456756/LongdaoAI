@@ -144,6 +144,13 @@ func (s *OpenAIGatewayService) AsyncImageProtocolConfigured(ctx context.Context,
 
 func (s *OpenAIGatewayService) AsyncImageTaskAccount(ctx context.Context, key *APIKey, record *ImageTaskRecord) (*Account, error) {
 	p := record.Provider
+	if p != nil && p.Billing != nil && p.Billing.SEPComputeRequestID != "" {
+		var err error
+		key, err = restoreSEPMediaBillingKey(ctx, key, p.Billing.SEPComputeRequestID, "client:"+p.RequestID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if p == nil || key.GroupID == nil || p.GroupID != *key.GroupID {
 		return nil, ErrImageTaskNotFound
 	}

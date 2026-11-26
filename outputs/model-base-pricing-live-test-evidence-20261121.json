@@ -1,0 +1,1251 @@
+{
+  "date": "2026-11-21",
+  "environment": "local compute gateway with configured live upstream",
+  "account": {
+    "id": 66,
+    "name": "脑生云测试"
+  },
+  "testUserId": 50,
+  "negativeUserId": 51,
+  "initialBalanceUSD": 20,
+  "finalBalanceUSD": 18.73708086,
+  "exchangeRate": "7.15",
+  "bases": [
+    {
+      "model": "gpt-5.6-luna",
+      "source_price_id": 154,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 154,
+        "account_id": 66,
+        "model": "gpt-5.6-luna",
+        "upstream_model": "gpt-5.6-luna",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.072"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.432"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.0072"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.09"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T14:55:01.974966+08:00"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "source_price_id": 155,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 155,
+        "account_id": 66,
+        "model": "gpt-5.6-sol",
+        "upstream_model": "gpt-5.6-sol",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "1.8"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "10.8"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.18"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "2.25"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:06:08.530843+08:00"
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "source_price_id": 156,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 156,
+        "account_id": 66,
+        "model": "gpt-5.6-terra",
+        "upstream_model": "gpt-5.6-terra",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.72"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "4.32"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.072"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.9"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:06:32.274705+08:00"
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "source_price_id": 160,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 160,
+        "account_id": 66,
+        "model": "gpt-6.1-sol",
+        "upstream_model": "gpt-6.1-sol",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.72"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "3.6"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.036"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.9"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:09:53.339645+08:00"
+    },
+    {
+      "model": "gpt-6-astra",
+      "source_price_id": 157,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 157,
+        "account_id": 66,
+        "model": "gpt-6-astra",
+        "upstream_model": "gpt-6-astra",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "3.6"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "18"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.36"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "4.5"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:06:35.729138+08:00"
+    },
+    {
+      "model": "gpt-6-luna",
+      "source_price_id": 158,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 158,
+        "account_id": 66,
+        "model": "gpt-6-luna",
+        "upstream_model": "gpt-6-luna",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.036"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.18"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.0036"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.045"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:07:45.542924+08:00"
+    },
+    {
+      "model": "gpt-6-sol",
+      "source_price_id": 159,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 159,
+        "account_id": 66,
+        "model": "gpt-6-sol",
+        "upstream_model": "gpt-6-sol",
+        "mode": "token",
+        "discount": "0.12",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "input",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.72"
+          },
+          {
+            "kind": "output",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "3.6"
+          },
+          {
+            "kind": "cache_read",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.072"
+          },
+          {
+            "kind": "cache_write",
+            "tier": "",
+            "unit": "USD/MTok",
+            "amount": "0.9"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:09:48.447292+08:00"
+    },
+    {
+      "model": "gpt-image-2-1k",
+      "source_price_id": 161,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 161,
+        "account_id": 66,
+        "model": "gpt-image-2-1k",
+        "upstream_model": "gpt-image-2-1k",
+        "mode": "image",
+        "discount": "1",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "image",
+            "tier": "1K",
+            "unit": "USD/image",
+            "amount": "0.3"
+          },
+          {
+            "kind": "image",
+            "tier": "2K",
+            "unit": "USD/image",
+            "amount": "0.3"
+          },
+          {
+            "kind": "image",
+            "tier": "4K",
+            "unit": "USD/image",
+            "amount": "0.3"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:10:05.398849+08:00"
+    },
+    {
+      "model": "gpt-image-2-2k",
+      "source_price_id": 162,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 162,
+        "account_id": 66,
+        "model": "gpt-image-2-2k",
+        "upstream_model": "gpt-image-2-2k",
+        "mode": "image",
+        "discount": "1",
+        "markup": "3",
+        "items": [
+          {
+            "kind": "image",
+            "tier": "1K",
+            "unit": "USD/image",
+            "amount": "0.6"
+          },
+          {
+            "kind": "image",
+            "tier": "2K",
+            "unit": "USD/image",
+            "amount": "0.6"
+          },
+          {
+            "kind": "image",
+            "tier": "4K",
+            "unit": "USD/image",
+            "amount": "0.6"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:10:09.368745+08:00"
+    },
+    {
+      "model": "seedance-2.0",
+      "source_price_id": 163,
+      "source_revision": 1,
+      "version": 1,
+      "price": {
+        "source_account_name": "脑生云测试",
+        "source_company_name": "脑生云",
+        "id": 163,
+        "account_id": 66,
+        "model": "seedance-2.0",
+        "upstream_model": "seedance-2.0",
+        "mode": "video",
+        "discount": "1",
+        "markup": "1",
+        "items": [
+          {
+            "kind": "video",
+            "tier": "480p",
+            "unit": "USD/second",
+            "amount": "0.462"
+          },
+          {
+            "kind": "video",
+            "tier": "720p",
+            "unit": "USD/second",
+            "amount": "1"
+          },
+          {
+            "kind": "video",
+            "tier": "1080p",
+            "unit": "USD/second",
+            "amount": "2.5"
+          }
+        ],
+        "policy": {},
+        "revision": 1
+      },
+      "updated_by": 1,
+      "updated_at": "2026-11-21T15:11:00.509395+08:00"
+    }
+  ],
+  "usage": [
+    {
+      "id": 190,
+      "request_id": "client:b89ee7be-fa65-493e-b543-78ff60117e45",
+      "model": "gpt-image-2-1k",
+      "inbound_endpoint": "/v1/images/edits",
+      "upstream_endpoint": "/v1/images/edits",
+      "group_id": 120,
+      "api_key_id": 176,
+      "input_tokens": 1673,
+      "output_tokens": 1056,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0,
+      "output_cost": 0,
+      "cache_read_cost": 0,
+      "cache_creation_cost": 0,
+      "total_cost": 0.3,
+      "actual_cost": 0.21,
+      "rate_multiplier": 0.7,
+      "image_count": 1,
+      "image_size": "1K",
+      "stream": false,
+      "billing_mode": "image",
+      "created_at": "2026-11-21T15:37:34.023114+08:00"
+    },
+    {
+      "id": 189,
+      "request_id": "client:d5e2a3fa-94ef-4b15-ad7d-3b3eae777a32",
+      "model": "gpt-image-2-1k",
+      "inbound_endpoint": "/v1/images/generations",
+      "upstream_endpoint": "/v1/images/generations",
+      "group_id": 120,
+      "api_key_id": 176,
+      "input_tokens": 13,
+      "output_tokens": 2112,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0,
+      "output_cost": 0,
+      "cache_read_cost": 0,
+      "cache_creation_cost": 0,
+      "total_cost": 0.6,
+      "actual_cost": 0.42,
+      "rate_multiplier": 0.7,
+      "image_count": 2,
+      "image_size": "1K",
+      "stream": false,
+      "billing_mode": "image",
+      "created_at": "2026-11-21T15:30:34.906422+08:00"
+    },
+    {
+      "id": 188,
+      "request_id": "client:f5b88e21-5ffc-4200-b672-43f7e3c3da0f",
+      "model": "gpt-6-luna",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.000006012,
+      "output_cost": 9e-7,
+      "cache_read_cost": 0.0000152064,
+      "cache_creation_cost": 0,
+      "total_cost": 0.0000221184,
+      "actual_cost": 0.000013271,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": true,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:29:20.886647+08:00"
+    },
+    {
+      "id": 187,
+      "request_id": "client:2a0e1edf-b3e2-4f39-8903-f8061c6633d3",
+      "model": "gpt-6-luna",
+      "inbound_endpoint": "/v1/responses",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 169,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.000006084,
+      "output_cost": 9e-7,
+      "cache_read_cost": 0.0000152064,
+      "cache_creation_cost": 0,
+      "total_cost": 0.0000221904,
+      "actual_cost": 0.0000133142,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:29:19.237165+08:00"
+    },
+    {
+      "id": 186,
+      "request_id": "client:76c28008-c98f-4e19-8e37-a43795bc8e0c",
+      "model": "gpt-image-2-2k",
+      "inbound_endpoint": "/v1/images/generations",
+      "upstream_endpoint": "/v1/images/generations",
+      "group_id": 120,
+      "api_key_id": 176,
+      "input_tokens": 13,
+      "output_tokens": 4224,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0,
+      "output_cost": 0,
+      "cache_read_cost": 0,
+      "cache_creation_cost": 0,
+      "total_cost": 0.6,
+      "actual_cost": 0.42,
+      "rate_multiplier": 0.7,
+      "image_count": 1,
+      "image_size": "2K",
+      "stream": false,
+      "billing_mode": "image",
+      "created_at": "2026-11-21T15:27:50.179758+08:00"
+    },
+    {
+      "id": 185,
+      "request_id": "client:2935e239-2a69-4d28-b12e-675829057fb8",
+      "model": "gpt-image-2-1k",
+      "inbound_endpoint": "/v1/images/generations",
+      "upstream_endpoint": "/v1/images/generations",
+      "group_id": 120,
+      "api_key_id": 176,
+      "input_tokens": 13,
+      "output_tokens": 1056,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0,
+      "output_cost": 0,
+      "cache_read_cost": 0,
+      "cache_creation_cost": 0,
+      "total_cost": 0.3,
+      "actual_cost": 0.21,
+      "rate_multiplier": 0.7,
+      "image_count": 1,
+      "image_size": "1K",
+      "stream": false,
+      "billing_mode": "image",
+      "created_at": "2026-11-21T15:27:26.343805+08:00"
+    },
+    {
+      "id": 184,
+      "request_id": "client:a082f76f-8826-43d7-af05-0ca1be40e95e",
+      "model": "gpt-6-sol",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.00012024,
+      "output_cost": 0.000018,
+      "cache_read_cost": 0.000304128,
+      "cache_creation_cost": 0,
+      "total_cost": 0.000442368,
+      "actual_cost": 0.0002654208,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:33.32952+08:00"
+    },
+    {
+      "id": 183,
+      "request_id": "client:70479c93-2a91-41fb-97b8-0044721d7565",
+      "model": "gpt-6-astra",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.0006012,
+      "output_cost": 0.00009,
+      "cache_read_cost": 0.00152064,
+      "cache_creation_cost": 0,
+      "total_cost": 0.00221184,
+      "actual_cost": 0.001327104,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:31.549412+08:00"
+    },
+    {
+      "id": 182,
+      "request_id": "client:c0c56762-3b65-4b21-a429-d8996ea86eea",
+      "model": "gpt-6.1-sol",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.00012024,
+      "output_cost": 0.000018,
+      "cache_read_cost": 0.000152064,
+      "cache_creation_cost": 0,
+      "total_cost": 0.000290304,
+      "actual_cost": 0.0001741824,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:27.577226+08:00"
+    },
+    {
+      "id": 181,
+      "request_id": "client:5377a241-d3d7-46fa-be66-4a26662e4f24",
+      "model": "gpt-5.6-terra",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 551,
+      "output_tokens": 5,
+      "cache_read_tokens": 3840,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.00039672,
+      "output_cost": 0.0000216,
+      "cache_read_cost": 0.00027648,
+      "cache_creation_cost": 0,
+      "total_cost": 0.0006948,
+      "actual_cost": 0.00041688,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:25.113527+08:00"
+    },
+    {
+      "id": 180,
+      "request_id": "client:c4fd6af5-ef47-4a69-a9aa-5381ca1976af",
+      "model": "gpt-5.6-sol",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.0003006,
+      "output_cost": 0.000054,
+      "cache_read_cost": 0.00076032,
+      "cache_creation_cost": 0,
+      "total_cost": 0.00111492,
+      "actual_cost": 0.000668952,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:23.025641+08:00"
+    },
+    {
+      "id": 179,
+      "request_id": "client:5bcf3526-18bc-4e04-82b3-66fc4f093d5e",
+      "model": "gpt-5.6-luna",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.000012024,
+      "output_cost": 0.00000216,
+      "cache_read_cost": 0.0000304128,
+      "cache_creation_cost": 0,
+      "total_cost": 0.0000445968,
+      "actual_cost": 0.0000267581,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:20.547952+08:00"
+    },
+    {
+      "id": 178,
+      "request_id": "client:1c85d957-1801-4a95-aecf-1499c7bc21ae",
+      "model": "gpt-6-luna",
+      "inbound_endpoint": "/v1/chat/completions",
+      "upstream_endpoint": "/v1/responses",
+      "group_id": 119,
+      "api_key_id": 175,
+      "input_tokens": 167,
+      "output_tokens": 5,
+      "cache_read_tokens": 4224,
+      "cache_creation_tokens": 0,
+      "cache_creation_5m_tokens": 0,
+      "cache_creation_1h_tokens": 0,
+      "input_cost": 0.000006012,
+      "output_cost": 9e-7,
+      "cache_read_cost": 0.0000152064,
+      "cache_creation_cost": 0,
+      "total_cost": 0.0000221184,
+      "actual_cost": 0.000013271,
+      "rate_multiplier": 0.6,
+      "image_count": 0,
+      "image_size": null,
+      "stream": false,
+      "billing_mode": "token",
+      "created_at": "2026-11-21T15:26:04.283443+08:00"
+    }
+  ],
+  "errors": [
+    {
+      "id": 96,
+      "client_request_id": "d6f7c686-af6e-4401-b9aa-b2f6ea613a4f",
+      "request_path": "/v1/videos",
+      "status_code": 400,
+      "error_source": "upstream_http",
+      "error_type": "invalid_request_error",
+      "error_message": "X-Video-Operation must be text-to-video or image-to-video",
+      "upstream_status_code": 400,
+      "upstream_error_message": "X-Video-Operation must be text-to-video or image-to-video",
+      "created_at": "2026-11-21T07:26:18.159479+00:00"
+    },
+    {
+      "id": 97,
+      "client_request_id": "b5565f37-4b65-48a5-9595-f6ee57f2d245",
+      "request_path": "/v1/videos",
+      "status_code": 409,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "Expected exactly one valid X-Video-Pricing-Version and X-Video-Operation (text-to-video or image-to-video) header",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:04.299088+00:00"
+    },
+    {
+      "id": 98,
+      "client_request_id": "1773b1b3-b075-47bd-afae-2006a4aefc9a",
+      "request_path": "/v1/chat/completions",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型尚未设置基础价格，请联系管理员配置",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.393653+00:00"
+    },
+    {
+      "id": 99,
+      "client_request_id": "132e8296-19c3-424c-82e7-e5e3cde92b77",
+      "request_path": "/v1/images/generations",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型尚未设置基础价格，请联系管理员配置",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.401063+00:00"
+    },
+    {
+      "id": 100,
+      "client_request_id": "e92ae2d9-ef48-470e-b3c1-fd34f71468f4",
+      "request_path": "/v1/videos",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型尚未设置基础价格，请联系管理员配置",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.409383+00:00"
+    },
+    {
+      "id": 101,
+      "client_request_id": "8d6f7c8b-7088-4050-90c9-924aede267b3",
+      "request_path": "/v1/chat/completions",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型尚未设置基础价格，请联系管理员配置",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.416001+00:00"
+    },
+    {
+      "id": 102,
+      "client_request_id": "9980b116-090a-434a-bf4b-f616da26ec0c",
+      "request_path": "/v1/images/generations",
+      "status_code": 403,
+      "error_source": "client_request",
+      "error_type": "api_error",
+      "error_message": "Image generation is not enabled for this group",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.429752+00:00"
+    },
+    {
+      "id": 103,
+      "client_request_id": "c0101b80-0ed0-48f3-a60c-a4653128db13",
+      "request_path": "/v1/videos",
+      "status_code": 400,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "model and prompt are required",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.445589+00:00"
+    },
+    {
+      "id": 104,
+      "client_request_id": "8b5b5f6e-2d37-4c9d-bf45-e55f27879112",
+      "request_path": "/v1/videos",
+      "status_code": 400,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "seconds or duration must be a positive integer",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:27:26.45913+00:00"
+    },
+    {
+      "id": 106,
+      "client_request_id": "53c4b759-9d86-4696-b834-6e97a5537898",
+      "request_path": "/v1/videos",
+      "status_code": 409,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "Video pricing version no longer matches the current quote: video pricing changed; obtain a new quote",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:28:12.516565+00:00"
+    },
+    {
+      "id": 107,
+      "client_request_id": "ab9606b0-c662-4d0b-b7ce-5fd1c694a003",
+      "request_path": "/v1/videos",
+      "status_code": 400,
+      "error_source": "upstream_http",
+      "error_type": "invalid_request_error",
+      "error_message": "X-Video-Operation must be text-to-video or image-to-video",
+      "upstream_status_code": 400,
+      "upstream_error_message": "X-Video-Operation must be text-to-video or image-to-video",
+      "created_at": "2026-11-21T07:28:12.598409+00:00"
+    },
+    {
+      "id": 108,
+      "client_request_id": "3d332acf-602b-4b66-8ddd-da36172f0120",
+      "request_path": "/v1/videos",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型基础价格的计费方式与当前接口不匹配，请联系管理员检查",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:16.662261+00:00"
+    },
+    {
+      "id": 109,
+      "client_request_id": "9bee7fc1-5812-4764-890d-dfba572a364b",
+      "request_path": "/v1/images/generations",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型基础价格的计费方式与当前接口不匹配，请联系管理员检查",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:16.676293+00:00"
+    },
+    {
+      "id": 110,
+      "client_request_id": "4260796f-7693-4fc1-a0b3-41da3ecfbd71",
+      "request_path": "/v1/sub2api/images/pricing",
+      "status_code": 400,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "Invalid model, operation, size, quality or n",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:16.684874+00:00"
+    },
+    {
+      "id": 111,
+      "client_request_id": "ef12bc7c-2e78-49a8-a052-37313796aef1",
+      "request_path": "/v1/sub2api/videos/pricing",
+      "status_code": 400,
+      "error_source": "client_request",
+      "error_type": "invalid_request_error",
+      "error_message": "Expected model (1-160 characters, no whitespace/control characters), operation (text-to-video/image-to-video), resolution (480p/720p/1080p), duration_seconds (1-600)",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:16.691272+00:00"
+    },
+    {
+      "id": 112,
+      "client_request_id": "f08ed3f3-aa2c-42d8-b414-a5a7612849b2",
+      "request_path": "/v1/sub2api/videos/pricing",
+      "status_code": 503,
+      "error_source": "gateway",
+      "error_type": "api_error",
+      "error_message": "模型尚未设置基础价格，请联系管理员配置",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:16.707741+00:00"
+    },
+    {
+      "id": 113,
+      "client_request_id": "ace6ce12-0d81-425b-8aa7-971e059897e3",
+      "request_path": "/v1/chat/completions",
+      "status_code": 403,
+      "error_source": "client_request",
+      "error_type": "api_error",
+      "error_message": "Insufficient account balance",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:40.622101+00:00"
+    },
+    {
+      "id": 114,
+      "client_request_id": "278a22fb-62bc-4f99-b274-b35784ae6469",
+      "request_path": "/v1/chat/completions",
+      "status_code": 401,
+      "error_source": "client_request",
+      "error_type": "api_error",
+      "error_message": "API key is disabled",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:29:40.662761+00:00"
+    },
+    {
+      "id": 115,
+      "client_request_id": "574ec040-eed8-4607-a668-6beea49c3d1c",
+      "request_path": "/v1/chat/completions",
+      "status_code": 429,
+      "error_source": "client_request",
+      "error_type": "api_error",
+      "error_message": "API key 额度已用完",
+      "upstream_status_code": null,
+      "upstream_error_message": null,
+      "created_at": "2026-11-21T07:31:22.024952+00:00"
+    }
+  ],
+  "video": {
+    "model": "seedance-2.0",
+    "duration_seconds": 4,
+    "resolution": "480p",
+    "quoted_amount_usd": "1.4784000000",
+    "rate_multiplier": 0.8,
+    "submit_status": 400,
+    "request_id": "client:ab9606b0-c662-4d0b-b7ce-5fd1c694a003",
+    "message": "X-Video-Operation must be text-to-video or image-to-video",
+    "ops_error_id": 107,
+    "upstream_status": 400,
+    "source": "upstream_http",
+    "result": "failed_before_acceptance_no_usage_record"
+  },
+  "imageArtifacts": [
+    {
+      "label": "gpt-image-2-1k",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "bytes": 1012414,
+      "sha256": "62a8b3ff14832d04b3566c2cf439c20ae917114fc0fa6d27ac70a9d3e7ee6551"
+    },
+    {
+      "label": "gpt-image-2-2k",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "bytes": 2453760,
+      "sha256": "19705736a101b45870dc8142215d2b4eeb75075f7f5b84a4e2c7732d98aad91f"
+    },
+    {
+      "label": "gpt-image-2-1k-n2-1",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "bytes": 1192378,
+      "sha256": "ed981d8892452410c78fb0f356e1dcc098bc49ac0e38aa685a60a434b4e91828"
+    },
+    {
+      "label": "gpt-image-2-1k-n2-2",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "bytes": 1222758,
+      "sha256": "062297fe07420e3a45ba65ed6e3845ddf3f2a1d37d7854068694d2da85d66cb2"
+    }
+  ],
+  "checks": [
+    {
+      "id": 190,
+      "model": "gpt-image-2-1k",
+      "expected": 0.21,
+      "actual": 0.21,
+      "pass": true
+    },
+    {
+      "id": 189,
+      "model": "gpt-image-2-1k",
+      "expected": 0.42,
+      "actual": 0.42,
+      "pass": true
+    },
+    {
+      "id": 188,
+      "model": "gpt-6-luna",
+      "expected": 0.00001327104,
+      "actual": 0.000013271,
+      "pass": true
+    },
+    {
+      "id": 187,
+      "model": "gpt-6-luna",
+      "expected": 0.00001331424,
+      "actual": 0.0000133142,
+      "pass": true
+    },
+    {
+      "id": 186,
+      "model": "gpt-image-2-2k",
+      "expected": 0.42,
+      "actual": 0.42,
+      "pass": true
+    },
+    {
+      "id": 185,
+      "model": "gpt-image-2-1k",
+      "expected": 0.21,
+      "actual": 0.21,
+      "pass": true
+    },
+    {
+      "id": 184,
+      "model": "gpt-6-sol",
+      "expected": 0.0002654208,
+      "actual": 0.0002654208,
+      "pass": true
+    },
+    {
+      "id": 183,
+      "model": "gpt-6-astra",
+      "expected": 0.001327104,
+      "actual": 0.001327104,
+      "pass": true
+    },
+    {
+      "id": 182,
+      "model": "gpt-6.1-sol",
+      "expected": 0.00017418239999999997,
+      "actual": 0.0001741824,
+      "pass": true
+    },
+    {
+      "id": 181,
+      "model": "gpt-5.6-terra",
+      "expected": 0.00041687999999999995,
+      "actual": 0.00041688,
+      "pass": true
+    },
+    {
+      "id": 180,
+      "model": "gpt-5.6-sol",
+      "expected": 0.0006689520000000001,
+      "actual": 0.000668952,
+      "pass": true
+    },
+    {
+      "id": 179,
+      "model": "gpt-5.6-luna",
+      "expected": 0.00002675808,
+      "actual": 0.0000267581,
+      "pass": true
+    },
+    {
+      "id": 178,
+      "model": "gpt-6-luna",
+      "expected": 0.00001327104,
+      "actual": 0.000013271,
+      "pass": true
+    }
+  ],
+  "totalLoggedUSD": 1.2629191535,
+  "totalDebitedUSD": 1.26291914,
+  "totalDebitedCNY": 9.029871851,
+  "cleanup": {
+    "users": [
+      {
+        "id": 50,
+        "status": "disabled"
+      },
+      {
+        "id": 51,
+        "status": "disabled"
+      }
+    ],
+    "keys": [
+      {
+        "id": 175,
+        "status": "inactive"
+      },
+      {
+        "id": 176,
+        "status": "inactive"
+      },
+      {
+        "id": 177,
+        "status": "inactive"
+      },
+      {
+        "id": 178,
+        "status": "inactive"
+      }
+    ]
+  },
+  "referenceEdit": {
+    "status": 200,
+    "request_id": "client:af67d5b6-d4da-4db5-8550-310e0244fede",
+    "duration_ms": 23885,
+    "image_count": 1,
+    "source_format": "image/png",
+    "source_dimensions": [
+      1024,
+      1024
+    ]
+  },
+  "automatedTests": {
+    "parent_cases": 27,
+    "failed": 0,
+    "build_tags": [
+      "unit"
+    ],
+    "components": [
+      "service",
+      "handler",
+      "handler/admin"
+    ]
+  }
+}

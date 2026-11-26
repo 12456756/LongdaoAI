@@ -1,0 +1,115 @@
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const { chromium } = require('C:/Users/锐/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+
+async function main() {
+  const base = 'http://127.0.0.1:3301'
+  const userAgent = 'LongdaoPricingUIValidation/1.0'
+  const response = await fetch(`${base}/api/v1/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': userAgent },
+    body: JSON.stringify({ email: process.env.COMPUTE_TEST_ADMIN_EMAIL, password: process.env.COMPUTE_TEST_ADMIN_PASSWORD })
+  })
+  assert.equal(response.status, 200)
+  const { data: auth } = await response.json()
+  const headers = { Authorization: `Bearer ${auth.access_token}`, 'User-Agent': userAgent }
+  const catalogResponse = await fetch(`${base}/api/v1/admin/model-pricing`, { headers })
+  assert.equal(catalogResponse.status, 200)
+  const { data: catalog } = await catalogResponse.json()
+  const account = catalog.accounts.find(account => account.prices.length && account.models.some(model => model.startsWith('pricing-test-')))
+  assert.ok(account, 'Existing isolated pricing fixtures are required')
+  const price = account.prices[0]
+  const browser = await chromium.launch({ executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true })
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1060 }, userAgent })
+    await context.addInitScript(({ auth }) => {
+      localStorage.setItem('auth_token', auth.access_token)
+      localStorage.setItem('auth_user', JSON.stringify(auth.user))
+      localStorage.setItem('token_expires_at', String(Date.now() + 3600000))
+      localStorage.setItem('locale', 'zh-CN')
+      localStorage.setItem(`onboarding_tour_${auth.user.id}_${auth.user.role}_v4_interactive`, 'true')
+      localStorage.setItem(`admin_guide_${auth.user.id}_${auth.user.role}_v4_interactive`, 'true')
+    }, { auth })
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto(`${base}/admin/model-pricing`)
+    await page.getByRole('main').getByRole('heading', { name: '模型基础价格', exact: true }).waitFor()
+    const searchResponse = page.waitForResponse(response => response.url().includes('/admin/model-pricing?') && response.url().includes(`search=${price.model}`))
+    await page.getByRole('searchbox', { name: '搜索模型' }).fill(price.model)
+    await searchResponse
+    await page.getByRole('heading', { name: price.model, exact: true }).waitFor()
+    await page.waitForFunction(() => document.querySelector('.pricing-workspace')?.getAttribute('aria-busy') === 'false')
+    await page.screenshot({ path: path.join(__dirname, 'pricing-redesign-desktop.png'), fullPage: true, animations: 'disabled' })
+    console.log('Base price desktop rendered')
+    const radios = page.getByRole('radio')
+    assert.ok(await radios.count() > 0)
+    await radios.last().check()
+    const apply = page.locator('.selection-footer button')
+    if (await apply.isEnabled()) {
+      await apply.click()
+      await page.getByRole('dialog').waitFor()
+      await page.getByText('新基础价', { exact: true }).waitFor()
+      await page.screenshot({ path: path.join(__dirname, 'pricing-redesign-confirmation.png'), animations: 'disabled' })
+      await page.getByRole('button', { name: '取消', exact: true }).click()
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.waitForFunction(() => document.querySelector('main').getBoundingClientRect().left < 30 && document.querySelector('aside').getBoundingClientRect().right < 1)
+    await page.screenshot({ path: path.join(__dirname, 'pricing-redesign-mobile.png'), fullPage: true, animations: 'disabled' })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Mobile page overflow')
+
+    await page.setViewportSize({ width: 1440, height: 1060 })
+    await page.goto(`${base}/admin/accounts`)
+    const row = page.getByRole('row').filter({ hasText: account.name }).first()
+    await row.getByRole('button', { name: '编辑', exact: true }).click()
+    await page.getByRole('tab', { name: /模型报价/ }).click()
+    const editor = page.locator('.account-pricing')
+    await editor.getByRole('heading', { name: /^模型报价/ }).waitFor()
+    await editor.locator('.quote-editor').waitFor()
+    assert.equal(await editor.getByLabel('选择或输入模型名称', { exact: true }).count(), 0)
+    assert.equal(await editor.getByRole('button', { name: '添加模型', exact: true }).count(), 0)
+    await editor.locator('.editor-title').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(__dirname, 'account-pricing-redesign-desktop.png'), animations: 'disabled' })
+    await editor.getByLabel('采购折扣系数', { exact: true }).fill('0.5')
+    await editor.getByLabel('公司加价倍数', { exact: true }).fill('1.2')
+    await editor.getByLabel(`${price.model} input 原价`, { exact: true }).fill('2')
+    const firstField = editor.locator('.field-row').first()
+    assert.equal(await firstField.locator('.procurement').textContent(), '采购价1')
+    assert.equal(await firstField.locator('.candidate').textContent(), '候选基础价1.2')
+    const sourceLink = editor.getByRole('link', { name: '模型基础价格' })
+    assert.equal(await sourceLink.getAttribute('target'), '_blank')
+    page.once('dialog', dialog => dialog.dismiss())
+    await editor.getByRole('button', { name: '图片 / 张', exact: true }).click()
+    assert.equal(await editor.getByRole('button', { name: 'Token', exact: true }).getAttribute('aria-pressed'), 'true')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await editor.locator('.price-section-heading').scrollIntoViewIfNeeded()
+    assert.equal(await editor.getByRole('button', { name: 'Token', exact: true }).getAttribute('aria-pressed'), 'true')
+    await page.screenshot({ path: path.join(__dirname, 'account-pricing-redesign-mobile.png'), animations: 'disabled' })
+    const overflow = await editor.evaluate(element => ({ scroll: element.scrollWidth, width: element.clientWidth }))
+    assert.ok(overflow.scroll <= overflow.width + 1, JSON.stringify(overflow))
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Account modal overflow')
+    await page.setViewportSize({ width: 1440, height: 1060 })
+    await page.getByRole('tab', { name: '账号配置', exact: true }).click()
+    await page.getByRole('button', { name: '模型白名单', exact: true }).click()
+    const extraModels = ['whitelist-pricing-alpha', 'whitelist-pricing-beta']
+    for (const model of extraModels) {
+      await page.getByPlaceholder('输入自定义模型名称', { exact: true }).fill(model)
+      await page.getByRole('button', { name: '填入', exact: true }).click()
+    }
+    await page.getByRole('tab', { name: /模型报价/ }).click()
+    for (const model of extraModels) {
+      await editor.locator('.quote-model').filter({ hasText: model }).click()
+      await editor.getByLabel(`${model} input 原价`, { exact: true }).waitFor()
+      assert.equal(await editor.locator('.editor-title h4').textContent(), model)
+      assert.equal(await editor.getByLabel('对外模型', { exact: true }).count(), 0)
+      assert.equal(await editor.getByLabel('上游模型', { exact: true }).count(), 0)
+    }
+    await editor.getByLabel(`${extraModels[1]} input 原价`, { exact: true }).fill('4')
+    await editor.locator('.quote-model').filter({ hasText: extraModels[0] }).click()
+    await editor.locator('.quote-model').filter({ hasText: extraModels[1] }).click()
+    assert.equal(await editor.getByLabel(`${extraModels[1]} input 原价`, { exact: true }).inputValue(), '4')
+    await page.screenshot({ path: path.join(__dirname, 'account-pricing-whitelist-desktop.png'), animations: 'disabled' })
+    assert.deepEqual(errors, [])
+    console.log(JSON.stringify({ result: 'passed', model: price.model, account: account.name, whitelistModels: extraModels, screenshots: 6 }))
+  } finally { await browser.close() }
+}
+main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
+
+vi.mock('@/api/admin/modelPricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/admin/modelPricing')>(),
+  modelPricingAPI: {
+    companies: vi.fn().mockResolvedValue([]),
+    exchangeRate: vi.fn().mockResolvedValue({ usd_to_cny_rate: '7.15' }),
+    accountPrices: vi.fn().mockResolvedValue({ prices: [], version: 'test-version' })
+  }
+}))
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -335,6 +344,7 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('gpt-5.2')
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -359,6 +369,7 @@ describe('EditAccountModal', () => {
     expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe('gpt-5.2')
 
     await wrapper.get('[data-testid="rewrite-to-snapshot"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -386,6 +397,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -404,6 +416,7 @@ describe('EditAccountModal', () => {
     const protocol = wrapper.get('[data-testid="openai-video-protocol"]')
     expect((protocol.element as HTMLSelectElement).value).toBe('naoshengyun_legacy')
     await protocol.setValue('openai_videos')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.video_protocol).toBe('openai_videos')
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.api_key).toBe('sk-test')
@@ -438,6 +451,7 @@ describe('EditAccountModal', () => {
     expect(toggle.attributes('aria-checked')).toBe('true')
 
     await toggle.trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -455,6 +469,7 @@ describe('EditAccountModal', () => {
     const toggle = wrapper.get('[data-testid="openai-long-context-billing-toggle"]')
     expect(toggle.attributes('aria-checked')).toBe('false')
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -474,6 +489,7 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.find('[data-testid="openai-long-context-billing-toggle"]').exists()).toBe(false)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -496,6 +512,7 @@ describe('EditAccountModal', () => {
     const toggle = wrapper.get('[data-testid="openai-long-context-billing-toggle"]')
     expect(toggle.attributes('aria-checked')).toBe('false')
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -516,6 +533,7 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.get('[data-testid="openai-long-context-billing-toggle"]').attributes('aria-checked')).toBe('false')
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -543,6 +561,7 @@ describe('EditAccountModal', () => {
 
     await inputWithValue('grok-latest').setValue('grok')
     await inputWithValue('grok-4.3').setValue('grok-build-0.1')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -563,6 +582,7 @@ describe('EditAccountModal', () => {
     expect((wrapper.get('input[placeholder="https://api.x.ai/v1"]').element as HTMLInputElement).value)
       .toBe('https://api.x.ai/v1')
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -580,6 +600,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('[data-testid="set-shadow-group"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -609,6 +630,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('[data-testid="openai-responses-mode-select"]').setValue('force_responses')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -628,6 +650,7 @@ describe('EditAccountModal', () => {
     expect(toggle.attributes('aria-checked')).toBe('false')
 
     await toggle.trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -648,6 +671,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('[data-testid="openai-responses-mode-select"]').setValue('auto')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -667,6 +691,7 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.findAll('input[type="checkbox"]').some((input) => (input.element as HTMLInputElement).checked)).toBe(true)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -690,7 +715,8 @@ describe('EditAccountModal', () => {
 
 	  await wrapper.get('[data-testid="auto-pause-5h-threshold"]').setValue('95')
 	  await wrapper.get('[data-testid="auto-pause-7d-threshold"]').setValue('96')
-	  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+	  await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
 	  expect(updateAccountMock).toHaveBeenCalledTimes(1)
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_5h_threshold).toBe(0.95)
@@ -711,7 +737,8 @@ describe('EditAccountModal', () => {
 	  const wrapper = mountModal(account)
 
 	  await wrapper.get('[data-testid="auto-pause-5h-disabled"]').trigger('click')
-	  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+	  await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
 	  expect(updateAccountMock).toHaveBeenCalledTimes(1)
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_5h_disabled).toBe(true)
@@ -748,6 +775,7 @@ describe('EditAccountModal', () => {
     expect(chatCheckbox.element.checked).toBe(true)
     expect(embeddingsCheckbox.element.checked).toBe(false)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -765,6 +793,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     expect(wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-videos"]').element.checked).toBe(true)
     expect(wrapper.get<HTMLSelectElement>('[data-testid="openai-responses-mode-select"]').element.disabled).toBe(true)
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual(['videos'])
   })
@@ -790,6 +819,7 @@ describe('EditAccountModal', () => {
     expect(responsesModeSelect.element.disabled).toBe(true)
     expect(wrapper.find('[data-testid="openai-responses-mode-not-applicable"]').exists()).toBe(true)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -814,6 +844,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('button[data-testid="codex-image-tool-enabled"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -832,6 +863,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('button[data-testid="codex-image-tool-disabled"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -852,6 +884,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('button[data-testid="codex-image-tool-block"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -872,6 +905,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('button[data-testid="codex-image-tool-inherit"]').trigger('click')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -889,6 +923,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
 
     await wrapper.get('[data-testid="edit-openai-ws-mode-select"]').setValue('http_bridge')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -911,6 +946,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -930,6 +966,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -949,6 +986,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).not.toHaveBeenCalled()
@@ -971,6 +1009,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -989,6 +1028,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -1009,6 +1049,7 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).not.toHaveBeenCalled()
@@ -1026,6 +1067,7 @@ describe('EditAccountModal', () => {
     expect(input.element.value).toBe('configured-project')
 
     await input.setValue('  updated-project  ')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
@@ -1045,6 +1087,7 @@ describe('EditAccountModal', () => {
     const input = wrapper.get<HTMLInputElement>('[data-testid="antigravity-project-id-input"]')
 
     await input.setValue('')
+    await flushPromises()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)

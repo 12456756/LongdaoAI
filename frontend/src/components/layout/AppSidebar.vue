@@ -770,6 +770,8 @@ const adminNavItems = computed((): NavItem[] => {
     },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
+    { path: '/admin/model-pricing', label: '模型基础价格', icon: PriceTagIcon, hideInSimpleMode: true },
+    { path: '/admin/sep', label: 'SEP 企业对接', icon: KeyIcon, hideInSimpleMode: true },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },

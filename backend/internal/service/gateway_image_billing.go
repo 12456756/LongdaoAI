@@ -48,6 +48,26 @@ func (s *OpenAIGatewayService) QuoteImageBilling(ctx context.Context, key *APIKe
 	}
 	base := s.ResolveUserGroupRateMultiplier(ctx, key.UserID, *key.GroupID, key.Group.RateMultiplier)
 	tokenMultiplier, imageMultiplier := computePeakAwareMultipliers(key, base, now)
+	tokenMultiplier, imageMultiplier, _ = SEPRequestMultipliers(key, tokenMultiplier, imageMultiplier, 1)
+	if s.billingService.UsesManagedBasePrices() {
+		p, err := s.billingService.BasePrice(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		quote := &ImageBillingQuote{Mode: p.Price.Mode, Source: p.String(), Multiplier: imageMultiplier, PricingAuthority: PricingAuthoritySub2APICustomerBilling}
+		if p.Price.Mode == BillingModeToken {
+			quote.Multiplier = tokenMultiplier
+			return quote, nil
+		}
+		cost, err := s.billingService.CalculateBasePrice(WithBasePriceSnapshot(ctx, p), model, NormalizeImageBillingTierOrDefault(size), UsageTokens{}, count, 0, imageMultiplier, "")
+		if err != nil {
+			return nil, err
+		}
+		amount := BillingUSDString(cost.ActualCost)
+		quote.Amount = &amount
+		quote.cost = cost
+		return quote, nil
+	}
 	quote := &ImageBillingQuote{Mode: BillingModeImage, Source: PricingSourceFallback, Multiplier: imageMultiplier}
 	billingModel := model
 	if s.channelService != nil {

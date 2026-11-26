@@ -90,7 +90,17 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 		ch.normalizeBillingModelSource()
 
 		supported := ch.SupportedModels()
-		s.fillGlobalPricingFallback(supported)
+		if s.basePrices != nil {
+			for i := range supported {
+				price, err := s.basePrices.GetBase(ctx, supported[i].Name)
+				if err != nil {
+					return nil, ErrBasePriceUnavailable.WithCause(err)
+				}
+				supported[i].Pricing = managedDisplayPricing(price)
+			}
+		} else {
+			s.fillGlobalPricingFallback(supported)
+		}
 
 		out = append(out, AvailableChannel{
 			ID:                 ch.ID,
@@ -108,6 +118,40 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
 	return out, nil
+}
+
+func managedDisplayPricing(base *ModelBasePrice) *ChannelModelPricing {
+	if base == nil {
+		return nil
+	}
+	p := &ChannelModelPricing{BillingMode: base.Price.Mode}
+	for _, item := range base.Price.Items {
+		value, ok := base.Rate(item.Kind, item.Tier)
+		if !ok {
+			continue
+		}
+		if item.Tier != "" {
+			if item.Kind == "image" || item.Kind == "video" || item.Kind == "request" {
+				p.Intervals = append(p.Intervals, PricingInterval{TierLabel: item.Tier, PerRequestPrice: &value})
+			}
+			continue
+		}
+		switch item.Kind {
+		case "input":
+			p.InputPrice = &value
+		case "output":
+			p.OutputPrice = &value
+		case "cache_read":
+			p.CacheReadPrice = &value
+		case "cache_write":
+			p.CacheWritePrice = &value
+		case "image_output":
+			p.ImageOutputPrice = &value
+		case "request":
+			p.PerRequestPrice = &value
+		}
+	}
+	return p
 }
 
 // fillGlobalPricingFallback 对未命中渠道定价的支持模型，从全局 LiteLLM 数据合成一份

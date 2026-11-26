@@ -25,6 +25,8 @@ type Account struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 	// DeletedAt holds the value of the "deleted_at" field.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// UpstreamCompanyID holds the value of the "upstream_company_id" field.
+	UpstreamCompanyID *int64 `json:"upstream_company_id,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
 	// Notes holds the value of the "notes" field.
@@ -175,7 +177,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority, account.FieldParentAccountID:
+		case account.FieldID, account.FieldUpstreamCompanyID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority, account.FieldParentAccountID:
 			values[i] = new(sql.NullInt64)
 		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus, account.FieldQuotaDimension:
 			values[i] = new(sql.NullString)
@@ -220,6 +222,13 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DeletedAt = new(time.Time)
 				*_m.DeletedAt = value.Time
+			}
+		case account.FieldUpstreamCompanyID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_company_id", values[i])
+			} else if value.Valid {
+				_m.UpstreamCompanyID = new(int64)
+				*_m.UpstreamCompanyID = value.Int64
 			}
 		case account.FieldName:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -484,6 +493,11 @@ func (_m *Account) String() string {
 	if v := _m.DeletedAt; v != nil {
 		builder.WriteString("deleted_at=")
 		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.UpstreamCompanyID; v != nil {
+		builder.WriteString("upstream_company_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
 	builder.WriteString("name=")

@@ -25,8 +25,10 @@ var (
 
 // Text redacts fragments, rather than replacing an entire error containing a URL or secret.
 var privateKey = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
+var passwordHash = regexp.MustCompile(`\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}`)
 
 func Text(s string) string {
+	s = passwordHash.ReplaceAllString(s, "[redacted-password-hash]")
 	s = privateKey.ReplaceAllString(s, "[redacted-private-key]")
 	s = bearer.ReplaceAllString(s, "$1 [redacted]")
 	s = connection.ReplaceAllString(s, "$1[redacted]@")
@@ -48,7 +50,7 @@ func sensitive(k string) bool {
 	}
 	compact := strings.ReplaceAll(k, "_", "")
 	switch compact {
-	case "accesstoken", "refreshtoken", "idtoken", "clientsecret", "privatekey", "authorizationcode", "codeverifier", "connectionstring", "fullname", "firstname", "lastname", "phonenumber", "ipaddress", "stacktrace":
+	case "passwordhash", "encryptedpasswordhash", "accesstoken", "refreshtoken", "idtoken", "clientsecret", "privatekey", "authorizationcode", "codeverifier", "connectionstring", "fullname", "firstname", "lastname", "phonenumber", "ipaddress", "stacktrace":
 		return true
 	}
 	switch k {

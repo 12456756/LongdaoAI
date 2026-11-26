@@ -12,16 +12,17 @@ import (
 )
 
 type AsyncImageBillingSnapshot struct {
-	KeyID          int64                `json:"key_id"`
-	UserID         int64                `json:"user_id"`
-	GroupID        int64                `json:"group_id"`
-	Model          string               `json:"model"`
-	Size           string               `json:"size"`
-	Multiplier     float64              `json:"multiplier"`
-	Cost           CostBreakdown        `json:"cost"`
-	Mapping        ChannelMappingResult `json:"mapping"`
-	SubscriptionID *int64               `json:"subscription_id,omitempty"`
-	Endpoint       string               `json:"endpoint"`
+	SEPComputeRequestID string               `json:"sep_compute_request_id,omitempty"`
+	KeyID               int64                `json:"key_id"`
+	UserID              int64                `json:"user_id"`
+	GroupID             int64                `json:"group_id"`
+	Model               string               `json:"model"`
+	Size                string               `json:"size"`
+	Multiplier          float64              `json:"multiplier"`
+	Cost                CostBreakdown        `json:"cost"`
+	Mapping             ChannelMappingResult `json:"mapping"`
+	SubscriptionID      *int64               `json:"subscription_id,omitempty"`
+	Endpoint            string               `json:"endpoint"`
 }
 
 type ImageBillingOutcome struct {
@@ -49,6 +50,9 @@ func (s *OpenAIGatewayService) PrepareAsyncImageBilling(ctx context.Context, key
 		return nil, errors.New("Asynchronous image request has no deterministic image/per-request price; configure the model channel or group image price")
 	}
 	b := &AsyncImageBillingSnapshot{KeyID: key.ID, UserID: key.UserID, GroupID: derefGroupID(key.GroupID), Model: request.Model, Size: request.Size, Multiplier: quote.Multiplier, Cost: *quote.cost, Mapping: mapping, Endpoint: request.Endpoint + "/async"}
+	if key.SEP != nil {
+		b.SEPComputeRequestID = key.SEP.ComputeRequestID
+	}
 	if subscription != nil && key.Group != nil && key.Group.IsSubscriptionType() {
 		id := subscription.ID
 		b.SubscriptionID = &id
@@ -134,6 +138,13 @@ func (s *OpenAIGatewayService) finishAsyncImageBilling(ctx context.Context, key 
 		}
 		return imageBillingProblem(errors.New("Image task has no billing snapshot"))
 	}
+	if p.Billing.SEPComputeRequestID != "" {
+		var err error
+		key, err = restoreSEPMediaBillingKey(ctx, key, p.Billing.SEPComputeRequestID, "client:"+p.RequestID)
+		if err != nil {
+			return imageBillingProblem(err)
+		}
+	}
 	repo, ok := s.usageBillingRepo.(ImageBillingOutcomeRepository)
 	if !ok {
 		return imageBillingProblem(errors.New("Image billing outcome repository is unavailable"))
@@ -149,7 +160,14 @@ func (s *OpenAIGatewayService) finishAsyncImageBilling(ctx context.Context, key 
 		return &ImageTaskBillingStatus{Status: row.Status, ActualCostUSD: row.ActualCostUSD}
 	}
 	if record.Status == ImageTaskStatusFailed {
-		row, err = repo.CloseImageBillingWithoutCharge(ctx, key.ID, key.UserID, "client:"+p.RequestID)
+		if key.SEP != nil {
+			err = key.SEP.Service.FinalizeUnchargedMedia(ctx, key, "failed", false, p.Fingerprint)
+			if err == nil {
+				row, err = repo.FindImageBillingOutcome(ctx, key.ID, key.UserID, "client:"+p.RequestID)
+			}
+		} else {
+			row, err = repo.CloseImageBillingWithoutCharge(ctx, key.ID, key.UserID, "client:"+p.RequestID)
+		}
 	} else if record.Status == ImageTaskStatusCompleted {
 		b := p.Billing
 		if key.User == nil || key.Group == nil || key.ID != b.KeyID || key.UserID != b.UserID || derefGroupID(key.GroupID) != b.GroupID || account == nil {
@@ -164,7 +182,7 @@ func (s *OpenAIGatewayService) finishAsyncImageBilling(ctx context.Context, key 
 			group.SubscriptionType = SubscriptionTypeSubscription
 			subscription = &UserSubscription{ID: *b.SubscriptionID}
 		}
-		billingCtx := context.WithValue(ctx, ctxkey.ClientRequestID, p.RequestID)
+		billingCtx := SEPUsageContext(context.WithValue(ctx, ctxkey.ClientRequestID, p.RequestID), &billingKey)
 		err = s.RecordUsage(billingCtx, &OpenAIRecordUsageInput{DeferredImage: true, FrozenImageBilling: b, APIKey: &billingKey, User: key.User, Account: account, Subscription: subscription, APIKeyService: updater, RequestPayloadHash: p.Fingerprint, InboundEndpoint: b.Endpoint, UpstreamEndpoint: "/v1/images/generations/async", QuotaPlatform: PlatformOpenAI, ChannelUsageFields: b.Mapping.ToUsageFields(b.Model, p.UpstreamModel), Result: &OpenAIForwardResult{ResponseID: p.UpstreamTaskID, Model: b.Model, UpstreamModel: p.UpstreamModel, ImageCount: 1, ImageSize: b.Size, ImageInputSize: b.Size}})
 		if err == nil {
 			row, err = repo.FindImageBillingOutcome(ctx, key.ID, key.UserID, "client:"+p.RequestID)

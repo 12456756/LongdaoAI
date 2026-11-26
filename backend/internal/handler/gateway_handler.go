@@ -1000,6 +1000,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 // Falls back to default models if no whitelist is configured
 func (h *GatewayHandler) Models(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	if apiKey != nil && apiKey.SEP != nil {
+		models, err := h.gatewayService.SEPModels(c.Request.Context(), apiKey)
+		if err != nil {
+			middleware2.WriteSEPError(c, err, "models")
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		writeOpenAIModelsList(c, models)
+		return
+	}
 
 	var groupID *int64
 	var platform string
@@ -2095,6 +2105,12 @@ func (h *GatewayHandler) maybeLogCompatibilityFallbackMetrics(reqLog *zap.Logger
 }
 
 func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
+	if service.SEPExecutionFromContext(parent) != nil && task != nil {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
+		defer cancel()
+		task(ctx)
+		return
+	}
 	if task == nil {
 		return
 	}

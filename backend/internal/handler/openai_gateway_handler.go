@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -94,6 +95,9 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if parent == nil {
 		return base
 	}
+	if e := service.SEPExecutionFromContext(parent); e != nil {
+		base = service.WithSEPExecution(base, e)
+	}
 	if clientRequestID, _ := parent.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
 		base = context.WithValue(base, ctxkey.ClientRequestID, strings.TrimSpace(clientRequestID))
 	}
@@ -108,7 +112,11 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 		return nil
 	}
 	return func(ctx context.Context) {
-		task(usageRecordContext(parent, ctx))
+		ctx = usageRecordContext(parent, ctx)
+		if snapshot := service.BasePriceSnapshot(parent); snapshot != nil {
+			ctx = service.WithBasePriceSnapshot(ctx, snapshot)
+		}
+		task(ctx)
 	}
 }
 
@@ -1458,6 +1466,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
+	var turnBasePrice *service.ModelBasePrice
+	if h.gatewayService.BillingService().UsesManagedBasePrices() && (h.cfg == nil || h.cfg.RunMode != config.RunModeSimple) {
+		turnBasePrice, err = h.gatewayService.BillingService().BasePrice(ctx, reqModel)
+		if err == nil {
+			_, snapshotErr := h.gatewayService.BillingService().BasePriceRepository().RememberSnapshot(ctx, apiKey.ID, apiKey.UserID, "ws:"+uuid.NewString(), turnBasePrice)
+			if snapshotErr != nil {
+				err = service.ErrBasePriceUnavailable.WithCause(snapshotErr)
+			}
+		}
+		if err != nil {
+			payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"code": infraerrors.Reason(err), "message": infraerrors.Message(err), "source": "platform"}})
+			_ = wsConn.Write(ctx, coderws.MessageText, payload)
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model pricing is unavailable; request was not dispatched")
+			return
+		}
+	}
 	if reqModel == "" {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
@@ -1734,6 +1758,21 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
+				if h.gatewayService.BillingService().UsesManagedBasePrices() && (h.cfg == nil || h.cfg.RunMode != config.RunModeSimple) {
+					price, priceErr := h.gatewayService.BillingService().BasePrice(ctx, model)
+					if priceErr == nil {
+						_, snapshotErr := h.gatewayService.BillingService().BasePriceRepository().RememberSnapshot(ctx, apiKey.ID, apiKey.UserID, "ws:"+uuid.NewString(), price)
+						if snapshotErr != nil {
+							priceErr = service.ErrBasePriceUnavailable.WithCause(snapshotErr)
+						}
+					}
+					if priceErr != nil {
+						payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"code": infraerrors.Reason(priceErr), "message": infraerrors.Message(priceErr), "source": "platform"}})
+						_ = wsConn.Write(ctx, coderws.MessageText, payload)
+						return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model pricing is unavailable; request was not dispatched", priceErr)
+					}
+					turnBasePrice = price
+				}
 				if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload); decision != nil && decision.Blocked {
 					writeContentModerationWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, decision.Message, nil)
@@ -1812,7 +1851,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
+				usageCtx := ctx
+				if turnBasePrice != nil {
+					usageCtx = service.WithBasePriceSnapshot(ctx, turnBasePrice)
+				}
+				h.submitOpenAIUsageRecordTask(usageCtx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             result,
 						APIKey:             apiKey,
@@ -2024,6 +2067,10 @@ func getContextInt64(c *gin.Context, key string) (int64, bool) {
 }
 
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
+	if service.SEPExecutionFromContext(parent) != nil {
+		h.submitMandatoryUsageRecordTask(parent, task)
+		return
+	}
 	if task == nil {
 		return
 	}

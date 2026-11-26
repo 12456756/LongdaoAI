@@ -34,6 +34,25 @@ func (r *BatchImageModelPricingResolver) BatchImageUnitPrice(ctx context.Context
 	if r == nil || r.Resolver == nil || job == nil || strings.TrimSpace(job.Model) == "" {
 		return 0, ErrBatchImageSettlementPricingMissing
 	}
+	if r.Resolver.billingService.UsesManagedBasePrices() {
+		p, err := r.Resolver.billingService.BasePrice(ctx, job.Model)
+		if err != nil {
+			return 0, err
+		}
+		tier := NormalizeImageBillingTierOrDefault(job.ImageSize)
+		kind := "image"
+		if p.Price.Mode == BillingModePerRequest {
+			kind = "request"
+		}
+		unit, ok := p.Rate(kind, tier)
+		if !ok && kind == "request" {
+			unit, ok = p.Rate(kind, "")
+		}
+		if !ok {
+			return 0, missingPriceItem(job.Model, tier)
+		}
+		return unit, nil
+	}
 	resolved := r.Resolver.Resolve(ctx, PricingInput{Model: job.Model})
 	if resolved == nil {
 		return 0, ErrBatchImageSettlementPricingMissing
@@ -294,6 +313,9 @@ func (s *BatchImageSettlementService) settlementUnitPrice(ctx context.Context, j
 			return 0, ErrBatchImageSettlementPricingMissing
 		}
 		return job.BillableUnitPrice, nil
+	}
+	if resolver, ok := s.Pricing.(*BatchImageModelPricingResolver); ok && resolver.Resolver != nil && resolver.Resolver.billingService.UsesManagedBasePrices() {
+		return 0, ErrBatchImageSettlementPricingMissing
 	}
 	unitPrice, err := s.Pricing.BatchImageUnitPrice(ctx, job)
 	if err != nil {

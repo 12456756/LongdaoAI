@@ -19,6 +19,9 @@ import (
 )
 
 type Account struct {
+	UpstreamCompanyID       *int64
+	ModelPrices             []AccountModelPrice
+	PricingUpdate           *AccountPricingUpdate `json:"-"`
 	ID                      int64
 	Name                    string
 	Notes                   *string

@@ -404,7 +404,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
 	updates[SettingKeyBalanceLowNotifyThreshold] = strconv.FormatFloat(settings.BalanceLowNotifyThreshold, 'f', 8, 64)
 	updates[SettingKeyBalanceLowNotifyRechargeURL] = settings.BalanceLowNotifyRechargeURL
-	updates[SettingKeyBalanceDisplayCnyRate] = strconv.FormatFloat(settings.BalanceDisplayCnyRate, 'f', -1, 64)
+	if settings.PlatformUSDToCNYRate != "" {
+		if err := ValidatePlatformExchangeRate(settings.PlatformUSDToCNYRate); err != nil {
+			return nil, err
+		}
+		updates[SettingKeyPlatformUSDToCNYRate] = settings.PlatformUSDToCNYRate
+	}
 	updates[SettingKeySubscriptionExpiryNotifyEnabled] = strconv.FormatBool(settings.SubscriptionExpiryNotifyEnabled)
 	updates[SettingKeyAccountQuotaNotifyEnabled] = strconv.FormatBool(settings.AccountQuotaNotifyEnabled)
 	updates[SettingKeyAccountQuotaNotifyEmails] = MarshalNotifyEmails(settings.AccountQuotaNotifyEmails)

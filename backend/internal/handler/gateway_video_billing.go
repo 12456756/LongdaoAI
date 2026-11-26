@@ -99,7 +99,7 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 		return
 	}
 	if h.gatewayService == nil {
-		h.errorResponse(c, http.StatusForbidden, "api_error", "Platform model validation service is not initialized")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Platform model validation service is not initialized")
 		return
 	}
 	if !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
@@ -108,6 +108,9 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	quote, err := h.openAIGatewayService.QuoteVideoBilling(c.Request.Context(), key, request.Model, request.Resolution, request.DurationSeconds, now)
+	if writeModelPricingError(c, err) {
+		return
+	}
 	if err != nil || quote == nil || math.IsNaN(quote.Multiplier) || math.IsInf(quote.Multiplier, 0) || quote.Multiplier < 0 {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read or version video quote", err, "Quote is missing or its multiplier is invalid"))
 		return
@@ -129,6 +132,26 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 	response.PricingVersion, err = quote.Version(key, request.Model, request.Operation, request.Resolution, request.DurationSeconds)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Video pricing is unavailable")
+		return
+	}
+	if key.SEP != nil {
+		value, err := key.SEP.Service.QuoteResponse(c.Request.Context(), key, response, quote.Amount, "video")
+		if err != nil {
+			h.errorResponse(c, 503, "sep_quote_unavailable", err.Error())
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, value)
+		return
+	}
+	if value, ok := c.Get("sep_platform_validation"); ok {
+		v, err := value.(*service.SEPService).ValidationResponse(c.Request.Context(), response)
+		if err != nil {
+			h.errorResponse(c, 503, "sep_quote_unavailable", err.Error())
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, v)
 		return
 	}
 	c.Header("Cache-Control", "no-store")

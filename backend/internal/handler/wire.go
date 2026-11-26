@@ -124,8 +124,10 @@ func ProvideHandlers(
 	batchImageHandler *BatchImageHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
+	sepHandler *SEPHandler,
 ) *Handlers {
 	return &Handlers{
+		SEP:              sepHandler,
 		Auth:             authHandler,
 		User:             userHandler,
 		APIKey:           apiKeyHandler,
@@ -150,6 +152,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	NewSEPHandler,
 	// Top-level handlers
 	NewAuthHandler,
 	NewUserHandler,

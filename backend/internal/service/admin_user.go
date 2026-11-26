@@ -16,6 +16,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/shopspring/decimal"
 )
 
 // User management implementations
@@ -206,6 +207,12 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if err != nil {
 		return nil, err
 	}
+	if user.SEPBalance != nil && input.Role != "" && input.Role != RoleUser {
+		return nil, infraerrors.Forbidden("SEP_ENTERPRISE_ROLE_FIXED", "SEP 企业绑定账号必须保持普通用户角色，未修改")
+	}
+	if user.PasswordHash == "!sep-service-account" {
+		return nil, infraerrors.Forbidden("SEP_ACCOUNT_MANAGED", "SEP 企业账号请在 SEP 企业对接页面调整")
+	}
 
 	// Protect admin users: cannot disable admin accounts
 	if user.Role == "admin" && input.Status == "disabled" {
@@ -341,6 +348,9 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	if user.SEPBalance != nil || user.PasswordHash == "!sep-service-account" {
+		return infraerrors.Forbidden("SEP_ACCOUNT_MANAGED", "该账号绑定 SEP 企业并保留账务记录，不能删除；请通过 SEP 企业对接页面停用")
+	}
 	if user.Role == "admin" {
 		return errors.New("cannot delete admin user")
 	}
@@ -463,6 +473,22 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	if user.SEPBalance != nil {
+		accounting, ok := s.userRepo.(SEPAccountAccounting)
+		if !ok {
+			return nil, infraerrors.New(503, "SEP_ACCOUNTING_UNAVAILABLE", "企业人民币账务服务未接入，未执行余额变动")
+		}
+		receipt, err := accounting.AdjustSEPAccountBalance(ctx, SEPBalanceChange{UserID: userID, Operation: operation, Amount: fmt.Sprint(balance), Currency: "CNY", Notes: notes})
+		if err != nil {
+			return nil, SEPAdminBalanceError(err)
+		}
+		user.SEPBalance.Available = receipt.Available
+		available, _ := decimal.NewFromString(receipt.Available)
+		rate, _ := decimal.NewFromString(user.SEPBalance.ExchangeRate)
+		user.Balance = available.Div(rate).InexactFloat64()
+		user.SEPBalanceReceipt = receipt
+		return user, nil
 	}
 
 	oldBalance := user.Balance

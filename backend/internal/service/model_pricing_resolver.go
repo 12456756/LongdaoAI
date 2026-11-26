@@ -64,6 +64,25 @@ type PricingInput struct {
 // 1. 获取基础定价（LiteLLM → Fallback）
 // 2. 如果指定了 GroupID，查找渠道定价并覆盖
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
+	if r.billingService.UsesManagedBasePrices() {
+		p, err := r.billingService.BasePrice(ctx, input.Model)
+		if err != nil {
+			return &ResolvedPricing{Source: "managed"}
+		}
+		resolved := &ResolvedPricing{Mode: p.Price.Mode, Source: "managed", BasePricing: p.TokenPricing(), SupportsCacheBreakdown: p.TokenPricing().SupportsCacheBreakdown}
+		for _, item := range p.Price.Items {
+			if item.Kind == "image" || item.Kind == "video" || item.Kind == "request" {
+				price, ok := p.Rate(item.Kind, item.Tier)
+				if ok {
+					resolved.RequestTiers = append(resolved.RequestTiers, PricingInterval{TierLabel: item.Tier, PerRequestPrice: &price})
+					if item.Tier == "" {
+						resolved.DefaultPerRequestPrice = price
+					}
+				}
+			}
+		}
+		return resolved
+	}
 	var chPricing *ChannelModelPricing
 	if input.GroupID != nil && r.channelService != nil {
 		chPricing = r.channelService.GetChannelModelPricing(ctx, *input.GroupID, input.Model)

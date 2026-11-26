@@ -50,6 +50,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if user.Status != payment.EntityStatusActive {
 		return nil, infraerrors.Forbidden("USER_INACTIVE", "user account is disabled")
 	}
+	if user.SEPBalance != nil && req.OrderType != payment.OrderTypeBalance {
+		return nil, infraerrors.Forbidden("SEP_SUBSCRIPTION_NOT_SUPPORTED", "SEP 企业使用共享人民币余额，请选择余额充值；订阅套餐不适用于企业结算")
+	}
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
@@ -58,8 +61,6 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if plan != nil {
 		orderAmount = plan.Price
 		limitAmount = plan.Price
-	} else if req.OrderType == payment.OrderTypeBalance {
-		orderAmount = calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier)
 	}
 	feeRate := cfg.RechargeFeeRate
 	methodCurrency := payment.DefaultPaymentCurrency
@@ -69,7 +70,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 			return nil, err
 		}
 	}
-	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
+	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.PlatformUSDToCNYRate)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +86,13 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		selectedCurrency = paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
 	}
 	if selectedCurrency != methodCurrency {
-		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
+		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.PlatformUSDToCNYRate)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if req.OrderType == payment.OrderTypeBalance {
+		orderAmount, err = creditedBalanceForCurrency(req.Amount, cfg.PlatformUSDToCNYRate, selectedCurrency)
 		if err != nil {
 			return nil, err
 		}
@@ -171,6 +178,18 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if providerSnapshot == nil {
+		providerSnapshot = map[string]any{}
+	}
+	providerSnapshot["platform_usd_to_cny_rate"] = cfg.PlatformUSDToCNYRate
+	if user.SEPBalance != nil {
+		credit := decimal.NewFromFloat(req.Amount)
+		if sel != nil && paymentProviderConfigCurrency(sel.ProviderKey, sel.Config) == "USD" {
+			rate, _ := decimal.NewFromString(cfg.PlatformUSDToCNYRate)
+			credit = credit.Mul(rate)
+		}
+		providerSnapshot["sep_credit_cny"] = credit.Round(6).StringFixed(6)
+	}
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -633,26 +652,19 @@ func calculateCreateOrderPayAmount(limitAmount, feeRate float64, currency string
 	return payAmountStr, payAmount, nil
 }
 
-func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, currency, orderType string, usdToCnyRate float64) (string, float64, error) {
+func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, currency, orderType string, usdToCnyRate string) (string, float64, error) {
+	if currency != "CNY" && currency != "USD" {
+		return "", 0, infraerrors.BadRequest("UNSUPPORTED_PAYMENT_CURRENCY", "Recharge and subscriptions only support CNY or USD payments")
+	}
 	paymentAmount := limitAmount
 	if orderType == payment.OrderTypeSubscription {
-		paymentAmount = calculateSubscriptionGatewayBaseAmount(limitAmount, usdToCnyRate, currency)
+		var err error
+		paymentAmount, err = convertUSDToPaymentCurrency(limitAmount, usdToCnyRate, currency)
+		if err != nil {
+			return "", 0, err
+		}
 	}
 	return calculateCreateOrderPayAmount(paymentAmount, feeRate, currency)
-}
-
-// calculateSubscriptionGatewayBaseAmount 计算订阅订单的网关扣款基数。
-// 换算是显式 opt-in：仅当管理员配置了订阅汇率（rate > 0，1 USD = rate CNY）
-// 且网关币种为 CNY 时，按 price × rate 换算；未配置时保持 price 直付的存量行为。
-func calculateSubscriptionGatewayBaseAmount(amount, usdToCnyRate float64, currency string) float64 {
-	rate := normalizeSubscriptionUSDToCNYRate(usdToCnyRate)
-	if rate <= 0 || currency != payment.DefaultPaymentCurrency {
-		return amount
-	}
-	return decimal.NewFromFloat(amount).
-		Mul(decimal.NewFromFloat(rate)).
-		Round(int32(payment.CurrencyMaxFractionDigits(currency))).
-		InexactFloat64()
 }
 
 func validateCreateOrderAmountCurrency(amount float64, currency string) error {

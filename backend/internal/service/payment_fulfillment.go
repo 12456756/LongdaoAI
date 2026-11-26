@@ -328,6 +328,26 @@ func resolveRedeemAction(existing *RedeemCode, lookupErr error) redeemAction {
 }
 
 func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, lease *paymentFulfillmentLease) error {
+	if accounting, ok := s.userRepo.(SEPAccountAccounting); ok {
+		b, err := accounting.SEPAccountBalance(ctx, o.UserID)
+		if err != nil {
+			return SEPAdminBalanceError(err)
+		}
+		if b != nil {
+			amount, rate, err := sepOrderCredit(o)
+			if err != nil {
+				return err
+			}
+			_, err = accounting.AdjustSEPAccountBalance(ctx, SEPBalanceChange{UserID: o.UserID, BusinessRef: fmt.Sprintf("payment:%d", o.ID), Operation: "add", Amount: amount, Currency: "CNY", ExchangeRate: rate, Notes: "支付订单充值", Kind: "payment"})
+			if err != nil {
+				return SEPAdminBalanceError(err)
+			}
+			if err = s.markCompleted(ctx, o, lease, "RECHARGE_SUCCESS"); err != nil {
+				return SEPAdminBalanceError(&SEPError{Status: 503, Code: "PAYMENT_CREDITED_STATUS_PENDING", Message: fmt.Sprintf("订单 %d 的 %s 元已入账，但更新订单完成状态失败：%s；请恢复原订单，勿重复充值", o.ID, amount, safeSEPDiagnostic(err)), Stage: "payment_complete", AccountingStatus: "committed", BusinessRef: fmt.Sprintf("payment:%d", o.ID), Retryable: true, NextAction: "retry_original_order"})
+			}
+			return nil
+		}
+	}
 	// Idempotency: check if redeem code already exists (from a previous partial run)
 	existing, lookupErr := s.redeemService.GetByCode(ctx, o.RechargeCode)
 	action := resolveRedeemAction(existing, lookupErr)

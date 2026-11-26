@@ -15,18 +15,19 @@ import (
 
 // The snapshot contains prices and billing identity, never provider credentials.
 type VideoBillingSnapshot struct {
-	KeyID          int64                `json:"key_id"`
-	UserID         int64                `json:"user_id"`
-	GroupID        int64                `json:"group_id"`
-	Model          string               `json:"model"`
-	Multiplier     float64              `json:"multiplier"`
-	Cost           CostBreakdown        `json:"cost"`
-	Mapping        ChannelMappingResult `json:"mapping"`
-	SubscriptionID *int64               `json:"subscription_id,omitempty"`
-	PayloadHash    string               `json:"payload_hash"`
-	Resolution     string               `json:"resolution"`
-	Seconds        int                  `json:"seconds"`
-	Endpoint       string               `json:"endpoint"`
+	SEPComputeRequestID string               `json:"sep_compute_request_id,omitempty"`
+	KeyID               int64                `json:"key_id"`
+	UserID              int64                `json:"user_id"`
+	GroupID             int64                `json:"group_id"`
+	Model               string               `json:"model"`
+	Multiplier          float64              `json:"multiplier"`
+	Cost                CostBreakdown        `json:"cost"`
+	Mapping             ChannelMappingResult `json:"mapping"`
+	SubscriptionID      *int64               `json:"subscription_id,omitempty"`
+	PayloadHash         string               `json:"payload_hash"`
+	Resolution          string               `json:"resolution"`
+	Seconds             int                  `json:"seconds"`
+	Endpoint            string               `json:"endpoint"`
 }
 
 type VideoBillingOutcome struct {
@@ -73,6 +74,9 @@ func (s *OpenAIGatewayService) videoBillingSnapshot(ctx context.Context, key *AP
 		frozen = &FrozenVideoBilling{keyID: key.ID, userID: key.UserID, groupID: derefGroupID(key.GroupID), model: request.Model, multiplier: quote.Multiplier, cost: *quote.cost, mapping: quote.mapping}
 	}
 	snap := &VideoBillingSnapshot{KeyID: key.ID, UserID: key.UserID, GroupID: derefGroupID(key.GroupID), Model: request.Model, Multiplier: frozen.multiplier, Cost: frozen.cost, Mapping: frozen.mapping, PayloadHash: input.RequestPayloadHash, Resolution: request.Resolution, Seconds: request.Seconds, Endpoint: input.InboundEndpoint}
+	if key.SEP != nil {
+		snap.SEPComputeRequestID = key.SEP.ComputeRequestID
+	}
 	if input.Subscription != nil && key.Group != nil && key.Group.IsSubscriptionType() {
 		id := input.Subscription.ID
 		snap.SubscriptionID = &id
@@ -154,6 +158,13 @@ func (s *OpenAIGatewayService) finishVideoBilling(ctx context.Context, key *APIK
 		zero := "0"
 		return VideoBillingStatus{Status: "not_charged", ActualCostUSD: &zero}
 	}
+	if meta.Billing.SEPComputeRequestID != "" {
+		var err error
+		key, err = restoreSEPMediaBillingKey(ctx, key, meta.Billing.SEPComputeRequestID, meta.BillingRequestID)
+		if err != nil {
+			return billingProblem(err)
+		}
+	}
 	repo, ok := s.usageBillingRepo.(VideoBillingOutcomeRepository)
 	if !ok {
 		return billingProblem(errors.New("Video billing outcome repository is unavailable"))
@@ -169,6 +180,12 @@ func (s *OpenAIGatewayService) finishVideoBilling(ctx context.Context, key *APIK
 		return VideoBillingStatus{Status: prior.Status, ActualCostUSD: prior.ActualCostUSD}
 	}
 	if meta.LastStatus == "failed" || meta.LastStatus == "cancelled" {
+		if key.SEP != nil {
+			if err := key.SEP.Service.FinalizeUnchargedMedia(ctx, key, meta.LastStatus, true, prior.Fingerprint); err != nil {
+				return billingProblem(err)
+			}
+			return s.VideoRequestBillingStatus(ctx, key, meta.RequestID)
+		}
 		row, err := repo.CloseVideoBillingWithoutCharge(ctx, key.ID, key.UserID, meta.BillingRequestID)
 		if err != nil {
 			return billingProblem(err)
@@ -196,7 +213,7 @@ func (s *OpenAIGatewayService) finishVideoBilling(ctx context.Context, key *APIK
 		subscription = &UserSubscription{ID: *b.SubscriptionID}
 	}
 	frozen := &FrozenVideoBilling{keyID: b.KeyID, userID: b.UserID, groupID: b.GroupID, model: b.Model, multiplier: b.Multiplier, cost: b.Cost, mapping: b.Mapping}
-	billingCtx := context.WithValue(ctx, ctxkey.ClientRequestID, strings.TrimPrefix(meta.BillingRequestID, "client:"))
+	billingCtx := SEPUsageContext(context.WithValue(ctx, ctxkey.ClientRequestID, strings.TrimPrefix(meta.BillingRequestID, "client:")), &billingKey)
 	err := s.RecordUsage(billingCtx, &OpenAIRecordUsageInput{DeferredVideo: true, APIKey: &billingKey, User: key.User, Account: account, Subscription: subscription, APIKeyService: updater, FrozenVideoBilling: frozen, RequestPayloadHash: b.PayloadHash, InboundEndpoint: b.Endpoint, UpstreamEndpoint: "/v1/video/tasks", QuotaPlatform: PlatformOpenAI, ChannelUsageFields: b.Mapping.ToUsageFields(b.Model, meta.UpstreamModel), Result: &OpenAIForwardResult{ResponseID: meta.TaskID, Model: b.Model, BillingModel: meta.UpstreamModel, UpstreamModel: meta.UpstreamModel, VideoCount: 1, VideoResolution: b.Resolution, VideoDurationSeconds: b.Seconds}})
 	if err != nil {
 		status := s.VideoRequestBillingStatus(ctx, key, meta.RequestID)

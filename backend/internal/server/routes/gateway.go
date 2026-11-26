@@ -123,6 +123,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.Use(mediaRequestReplay)
+	gateway.Use(h.Gateway.ModelBasePriceGuard())
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
 	gateway.POST("/sub2api/images/pricing", h.Gateway.ImagePricing)
 	gateway.GET("/sub2api/usage", h.Gateway.RequestImageUsage)
@@ -236,7 +237,7 @@ func RegisterGatewayRoutes(
 	gemini.Use(clientRequestID)
 	gemini.Use(opsErrorLogger)
 	gemini.Use(endpointNorm)
-	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg), h.Gateway.ModelBasePriceGuard())
 	gemini.Use(requireGroupGoogle)
 	{
 		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
@@ -253,15 +254,15 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
-	r.POST("/alpha/search", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.AlphaSearch)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, responsesHandler)
+	r.POST("/alpha/search", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.OpenAIGateway.AlphaSearch)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, func(c *gin.Context) {
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
-	r.GET("/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, modelsHandler)
+	r.GET("/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, modelsHandler)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
@@ -272,14 +273,14 @@ func RegisterGatewayRoutes(
 		codexDirect.GET("/models", h.OpenAIGateway.CodexModels)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -292,23 +293,23 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	r.POST("/images/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, imagesHandler)
-	r.POST("/images/edits", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, imagesHandler)
-	r.POST("/images/generations/async", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.AsyncImage.Submit)
-	r.POST("/images/edits/async", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.AsyncImage.Submit)
-	r.GET("/images/tasks/:task_id", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.AsyncImage.Get)
-	r.GET("/images/tasks/:task_id/content", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.AsyncImage.Content)
-	r.POST("/videos/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, videoGenerationHandler)
-	r.POST("/videos", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.OpenAIGateway.Videos)
-	r.POST("/video/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.OpenAIGateway.Videos)
-	r.GET("/videos/:request_id/content", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.OpenAIGateway.Videos)
-	r.POST("/videos/edits", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, videoEditHandler)
-	r.POST("/videos/extensions", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, videoExtensionHandler)
-	r.GET("/videos/:request_id", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, videoStatusHandler)
-	r.PUT("/videos/:request_id/cancel", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, requireGroupAnthropic, h.OpenAIGateway.Videos)
+	r.POST("/images/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, imagesHandler)
+	r.POST("/images/edits", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, imagesHandler)
+	r.POST("/images/generations/async", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.AsyncImage.Submit)
+	r.POST("/images/edits/async", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.AsyncImage.Submit)
+	r.GET("/images/tasks/:task_id", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.AsyncImage.Get)
+	r.GET("/images/tasks/:task_id/content", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.AsyncImage.Content)
+	r.POST("/videos/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, videoGenerationHandler)
+	r.POST("/videos", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.OpenAIGateway.Videos)
+	r.POST("/video/generations", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.OpenAIGateway.Videos)
+	r.GET("/videos/:request_id/content", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.OpenAIGateway.Videos)
+	r.POST("/videos/edits", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, videoEditHandler)
+	r.POST("/videos/extensions", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, videoExtensionHandler)
+	r.GET("/videos/:request_id", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, videoStatusHandler)
+	r.PUT("/videos/:request_id/cancel", bodyLimit, clientRequestID, mediaReceipt, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), mediaRequestReplay, h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.OpenAIGateway.Videos)
 
 	// Antigravity 模型列表
-	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
+	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard(), requireGroupAnthropic, h.Gateway.AntigravityModels)
 
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")
@@ -317,7 +318,7 @@ func RegisterGatewayRoutes(
 	antigravityV1.Use(opsErrorLogger)
 	antigravityV1.Use(endpointNorm)
 	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
+	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth), h.Gateway.ModelBasePriceGuard())
 	antigravityV1.Use(requireGroupAnthropic)
 	{
 		antigravityV1.POST("/messages", h.Gateway.Messages)
@@ -332,7 +333,7 @@ func RegisterGatewayRoutes(
 	antigravityV1Beta.Use(opsErrorLogger)
 	antigravityV1Beta.Use(endpointNorm)
 	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg), h.Gateway.ModelBasePriceGuard())
 	antigravityV1Beta.Use(requireGroupGoogle)
 	{
 		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)

@@ -193,25 +193,24 @@ func TestValidatePlanPatch_AllNil(t *testing.T) {
 }
 
 // --- normalizePlanCurrency tests ---
-// Empty must stay empty (not coerced to the default payment currency),
-// so existing plans keep rendering without any currency label.
+// Empty input defaults to the platform's USD subscription unit.
 
-func TestNormalizePlanCurrency_EmptyKeepsEmpty(t *testing.T) {
+func TestNormalizePlanCurrency_EmptyDefaultsToUSD(t *testing.T) {
 	currency, err := normalizePlanCurrency("")
 	require.NoError(t, err)
-	require.Equal(t, "", currency)
+	require.Equal(t, "USD", currency)
 }
 
-func TestNormalizePlanCurrency_WhitespaceKeepsEmpty(t *testing.T) {
+func TestNormalizePlanCurrency_WhitespaceDefaultsToUSD(t *testing.T) {
 	currency, err := normalizePlanCurrency("   ")
 	require.NoError(t, err)
-	require.Equal(t, "", currency)
+	require.Equal(t, "USD", currency)
 }
 
 func TestNormalizePlanCurrency_LowercaseNormalized(t *testing.T) {
-	currency, err := normalizePlanCurrency("nzd")
+	currency, err := normalizePlanCurrency("usd")
 	require.NoError(t, err)
-	require.Equal(t, "NZD", currency)
+	require.Equal(t, "USD", currency)
 }
 
 func TestNormalizePlanCurrency_ValidUppercase(t *testing.T) {
@@ -223,17 +222,17 @@ func TestNormalizePlanCurrency_ValidUppercase(t *testing.T) {
 func TestNormalizePlanCurrency_TooShort(t *testing.T) {
 	_, err := normalizePlanCurrency("NZ")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "currency")
+	require.Contains(t, err.Error(), "USD")
 }
 
 func TestNormalizePlanCurrency_TooLong(t *testing.T) {
 	_, err := normalizePlanCurrency("NZDD")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "currency")
+	require.Contains(t, err.Error(), "USD")
 }
 
 func TestNormalizePlanCurrency_NonLetter(t *testing.T) {
 	_, err := normalizePlanCurrency("N2D")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "currency")
+	require.Contains(t, err.Error(), "USD")
 }

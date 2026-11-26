@@ -99,6 +99,7 @@ var (
 )
 
 type BatchImageJob struct {
+	ImageSize         string // Pricing lookup only; submitted jobs persist their billable unit-price snapshot.
 	ID                int64
 	BatchID           string
 	UserID            int64

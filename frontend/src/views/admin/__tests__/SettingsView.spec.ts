@@ -417,8 +417,7 @@ const baseSettingsResponse = {
   payment_max_pending_orders: 3,
   payment_enabled_types: [],
   payment_balance_disabled: false,
-  payment_balance_recharge_multiplier: 1,
-  payment_subscription_usd_to_cny_rate: 0,
+  platform_usd_to_cny_rate: "7.15",
   payment_recharge_fee_rate: 0,
   payment_load_balance_strategy: "round-robin",
   payment_product_name_prefix: "",
@@ -654,6 +653,20 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_source");
     expect(payload).not.toHaveProperty("payment_visible_method_alipay_enabled");
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
+  });
+
+  it("saves the single exchange rate as a decimal string without legacy rates", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openPaymentTab(wrapper);
+    await wrapper.get('#platform-exchange-rate').setValue('7.123456789012');
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(payload.platform_usd_to_cny_rate).toBe('7.123456789012');
+    expect(payload).not.toHaveProperty('payment_balance_recharge_multiplier');
+    expect(payload).not.toHaveProperty('payment_subscription_usd_to_cny_rate');
+    expect(wrapper.find('input[name="payment_subscription_usd_to_cny_rate"]').exists()).toBe(false);
   });
 
   it("submits the admin recharge affiliate rebate setting", async () => {

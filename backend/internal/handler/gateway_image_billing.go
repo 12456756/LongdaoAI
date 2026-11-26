@@ -92,7 +92,7 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 		return
 	}
 	if h.gatewayService == nil {
-		h.errorResponse(c, http.StatusForbidden, "api_error", "Platform model validation service is not initialized")
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Platform model validation service is not initialized")
 		return
 	}
 	if !h.gatewayService.ImageBillingModelAllowed(c.Request.Context(), key, request.Model) {
@@ -101,6 +101,9 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	quote, err := h.openAIGatewayService.QuoteImageBilling(c.Request.Context(), key, request.Model, request.Size, request.N, now)
+	if writeModelPricingError(c, err) {
+		return
+	}
 	if err != nil || quote == nil || math.IsNaN(quote.Multiplier) || math.IsInf(quote.Multiplier, 0) {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", localDiagnosticMessage("Read image quote", err, "Quote is missing or its multiplier is not finite"))
 		return
@@ -122,6 +125,26 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 	}{request, quote.Mode, quote.Source, quote.PricingAuthority, quote.Amount, quote.Multiplier})
 	sum := sha256.Sum256(fingerprint)
 	response.PricingVersion = "v1:" + hex.EncodeToString(sum[:])
+	if value, ok := c.Get("sep_platform_validation"); ok {
+		v, err := value.(*service.SEPService).ValidationResponse(c.Request.Context(), response)
+		if err != nil {
+			h.errorResponse(c, 503, "sep_quote_unavailable", err.Error())
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, v)
+		return
+	}
+	if key.SEP != nil {
+		value, err := key.SEP.Service.QuoteResponse(c.Request.Context(), key, response, quote.Amount, "image")
+		if err != nil {
+			h.errorResponse(c, 503, "sep_quote_unavailable", err.Error())
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, value)
+		return
+	}
 	c.Header("Cache-Control", "no-store")
 	service.WriteMediaJSON(c, http.StatusOK, response)
 }

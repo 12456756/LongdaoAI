@@ -70,6 +70,11 @@ func DeletedAt(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldDeletedAt, v))
 }
 
+// UpstreamCompanyID applies equality check predicate on the "upstream_company_id" field. It's identical to UpstreamCompanyIDEQ.
+func UpstreamCompanyID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUpstreamCompanyID, v))
+}
+
 // Name applies equality check predicate on the "name" field. It's identical to NameEQ.
 func Name(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldName, v))
@@ -323,6 +328,56 @@ func DeletedAtIsNil() predicate.Account {
 // DeletedAtNotNil applies the NotNil predicate on the "deleted_at" field.
 func DeletedAtNotNil() predicate.Account {
 	return predicate.Account(sql.FieldNotNull(FieldDeletedAt))
+}
+
+// UpstreamCompanyIDEQ applies the EQ predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDNEQ applies the NEQ predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDIn applies the In predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldUpstreamCompanyID, vs...))
+}
+
+// UpstreamCompanyIDNotIn applies the NotIn predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldUpstreamCompanyID, vs...))
+}
+
+// UpstreamCompanyIDGT applies the GT predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDGTE applies the GTE predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDLT applies the LT predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDLTE applies the LTE predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldUpstreamCompanyID, v))
+}
+
+// UpstreamCompanyIDIsNil applies the IsNil predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldUpstreamCompanyID))
+}
+
+// UpstreamCompanyIDNotNil applies the NotNil predicate on the "upstream_company_id" field.
+func UpstreamCompanyIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldUpstreamCompanyID))
 }
 
 // NameEQ applies the EQ predicate on the "name" field.

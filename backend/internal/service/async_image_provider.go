@@ -366,6 +366,11 @@ func (s *OpenAIGatewayService) SubmitAsyncImage(ctx context.Context, c *gin.Cont
 		output.Billing = s.finishAsyncImageBilling(ctx, key, account, record, updater)
 		return output, nil
 	}
+	if key.SEP != nil {
+		if err = key.SEP.Service.RecordExecutionProvider(ctx, key, "", record.ID); err != nil {
+			return output, imageLocalError(503, "sep_image_association_error", "Save SEP image execution association: "+err.Error())
+		}
+	}
 	if err = s.registerAsyncImageBilling(ctx, record); err == nil {
 		record.Provider.BillingRegistered = billing != nil
 		record.Provider.DispatchDeadline = time.Now().Add(asyncImageDispatchTimeout + 10*time.Second).Unix()

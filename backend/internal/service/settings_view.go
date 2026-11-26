@@ -255,7 +255,7 @@ type SystemSettings struct {
 	BalanceLowNotifyRechargeURL string
 
 	// 余额显示汇率（仅展示层，1 USD 显示为多少 CNY）
-	BalanceDisplayCnyRate float64
+	PlatformUSDToCNYRate string
 
 	// 订阅到期提醒
 	SubscriptionExpiryNotifyEnabled bool
@@ -328,7 +328,7 @@ type PublicSettings struct {
 	BalanceLowNotifyRechargeURL string
 
 	// 余额显示汇率（仅展示层，1 USD 显示为多少 CNY）
-	BalanceDisplayCnyRate float64 `json:"balance_display_cny_rate"`
+	PlatformUSDToCNYRate string `json:"platform_usd_to_cny_rate"`
 
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`

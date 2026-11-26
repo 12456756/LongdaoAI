@@ -108,41 +108,47 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	Name                    string         `json:"name" binding:"required"`
-	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required"`
-	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials" binding:"required"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             int            `json:"concurrency"`
-	Priority                int            `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ModelPricesVersion      string                       `json:"model_prices_version"`
+	UpstreamCompanyID       *int64                       `json:"upstream_company_id"`
+	ModelPrices             *[]service.AccountModelPrice `json:"model_prices"`
+	Name                    string                       `json:"name" binding:"required"`
+	Notes                   *string                      `json:"notes"`
+	Platform                string                       `json:"platform" binding:"required"`
+	Type                    string                       `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any               `json:"credentials" binding:"required"`
+	Extra                   map[string]any               `json:"extra"`
+	ProxyID                 *int64                       `json:"proxy_id"`
+	Concurrency             int                          `json:"concurrency"`
+	Priority                int                          `json:"priority"`
+	RateMultiplier          *float64                     `json:"rate_multiplier"`
+	LoadFactor              *int                         `json:"load_factor"`
+	GroupIDs                []int64                      `json:"group_ids"`
+	ExpiresAt               *int64                       `json:"expires_at"`
+	AutoPauseOnExpired      *bool                        `json:"auto_pause_on_expired"`
+	ConfirmMixedChannelRisk *bool                        `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any `json:"credentials"`
-	Extra                   map[string]any `json:"extra"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                *[]int64       `json:"group_ids"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ModelPricesVersion      string                       `json:"model_prices_version"`
+	UpstreamCompanyID       *int64                       `json:"upstream_company_id"`
+	ModelPrices             *[]service.AccountModelPrice `json:"model_prices"`
+	Name                    string                       `json:"name"`
+	Notes                   *string                      `json:"notes"`
+	Type                    string                       `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any               `json:"credentials"`
+	Extra                   map[string]any               `json:"extra"`
+	ProxyID                 *int64                       `json:"proxy_id"`
+	Concurrency             *int                         `json:"concurrency"`
+	Priority                *int                         `json:"priority"`
+	RateMultiplier          *float64                     `json:"rate_multiplier"`
+	LoadFactor              *int                         `json:"load_factor"`
+	Status                  string                       `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64                     `json:"group_ids"`
+	ExpiresAt               *int64                       `json:"expires_at"`
+	AutoPauseOnExpired      *bool                        `json:"auto_pause_on_expired"`
+	ConfirmMixedChannelRisk *bool                        `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
@@ -164,12 +170,13 @@ type BulkUpdateAccountsRequest struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	Platform    string `json:"platform"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	Group       string `json:"group"`
-	Search      string `json:"search"`
-	PrivacyMode string `json:"privacy_mode"`
+	UpstreamCompanyID string `json:"upstream_company_id"`
+	Platform          string `json:"platform"`
+	Type              string `json:"type"`
+	Status            string `json:"status"`
+	Group             string `json:"group"`
+	Search            string `json:"search"`
+	PrivacyMode       string `json:"privacy_mode"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -482,6 +489,14 @@ func (h *AccountHandler) listAccountSchedulerScoreFilterPool(
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
+	if raw := c.Query("upstream_company_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			response.BadRequest(c, "上游公司筛选编号无效")
+			return
+		}
+		c.Request = c.Request.WithContext(service.WithUpstreamCompanyFilter(c.Request.Context(), id))
+	}
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
 	accountType := c.Query("type")
@@ -815,6 +830,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			UpstreamCompanyID: req.UpstreamCompanyID, ModelPrices: req.ModelPrices, ModelPricesVersion: req.ModelPricesVersion,
 			Name:                  req.Name,
 			Notes:                 req.Notes,
 			Platform:              req.Platform,
@@ -942,6 +958,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+		UpstreamCompanyID: req.UpstreamCompanyID, ModelPrices: req.ModelPrices, ModelPricesVersion: req.ModelPricesVersion,
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -2022,12 +2039,13 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		return nil
 	}
 	return &service.BulkUpdateAccountFilters{
-		Platform:    filters.Platform,
-		Type:        filters.Type,
-		Status:      filters.Status,
-		Group:       filters.Group,
-		Search:      filters.Search,
-		PrivacyMode: filters.PrivacyMode,
+		UpstreamCompanyID: filters.UpstreamCompanyID,
+		Platform:          filters.Platform,
+		Type:              filters.Type,
+		Status:            filters.Status,
+		Group:             filters.Group,
+		Search:            filters.Search,
+		PrivacyMode:       filters.PrivacyMode,
 	}
 }
 

@@ -870,57 +870,11 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="input-label">1K ($)</label>
-              <input
-                v-model.number="createForm.image_price_1k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_1k')"
-              />
-            </div>
-            <div>
-              <label class="input-label">2K ($)</label>
-              <input
-                v-model.number="createForm.image_price_2k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_2k')"
-              />
-            </div>
-            <div>
-              <label class="input-label">4K ($)</label>
-              <input
-                v-model.number="createForm.image_price_4k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_4k')"
-              />
-            </div>
-          </div>
+          <RouterLink to="/admin/model-pricing" class="text-sm text-primary-600">模型基础价格</RouterLink>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(imagePricingI18nKey(createForm.platform, "modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            <div class="mb-1 font-medium">
-              {{ t(imagePricingI18nKey(createForm.platform, "finalPricePreview")) }}
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div
-                v-for="item in createImageFinalPricePreview"
-                :key="item.label"
-              >
-                {{ item.label }}: {{ item.value }}
-              </div>
-            </div>
-          </div>
+
           <div v-if="createForm.platform === 'gemini' && createForm.allow_image_generation" class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700">
             <label
               class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -1014,57 +968,11 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="input-label">480p ($/s)</label>
-              <input
-                v-model.number="createForm.video_price_480p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_480p')"
-              />
-            </div>
-            <div>
-              <label class="input-label">720p ($/s)</label>
-              <input
-                v-model.number="createForm.video_price_720p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_720p')"
-              />
-            </div>
-            <div>
-              <label class="input-label">1080p ($/s)</label>
-              <input
-                v-model.number="createForm.video_price_1080p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_1080p')"
-              />
-            </div>
-          </div>
+          <RouterLink to="/admin/model-pricing" class="text-sm text-primary-600">模型基础价格</RouterLink>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            <div class="mb-1 font-medium">
-              {{ t(videoPricingI18nKey("finalPricePreview")) }}
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div
-                v-for="item in createVideoFinalPricePreview"
-                :key="item.label"
-              >
-                {{ item.label }}: {{ item.value }}
-              </div>
-            </div>
-          </div>
+
         </div>
 
         <!-- 高峰时段倍率配置（仅订阅类型分组） -->
@@ -2384,57 +2292,11 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="input-label">1K ($)</label>
-              <input
-                v-model.number="editForm.image_price_1k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_1k')"
-              />
-            </div>
-            <div>
-              <label class="input-label">2K ($)</label>
-              <input
-                v-model.number="editForm.image_price_2k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_2k')"
-              />
-            </div>
-            <div>
-              <label class="input-label">4K ($)</label>
-              <input
-                v-model.number="editForm.image_price_4k"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_4k')"
-              />
-            </div>
-          </div>
+          <RouterLink to="/admin/model-pricing" class="text-sm text-primary-600">模型基础价格</RouterLink>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(imagePricingI18nKey(editForm.platform, "modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            <div class="mb-1 font-medium">
-              {{ t(imagePricingI18nKey(editForm.platform, "finalPricePreview")) }}
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div
-                v-for="item in editImageFinalPricePreview"
-                :key="item.label"
-              >
-                {{ item.label }}: {{ item.value }}
-              </div>
-            </div>
-          </div>
+
           <div v-if="editForm.platform === 'gemini' && editForm.allow_image_generation" class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700">
             <label
               class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -2528,57 +2390,11 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="input-label">480p ($/s)</label>
-              <input
-                v-model.number="editForm.video_price_480p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_480p')"
-              />
-            </div>
-            <div>
-              <label class="input-label">720p ($/s)</label>
-              <input
-                v-model.number="editForm.video_price_720p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_720p')"
-              />
-            </div>
-            <div>
-              <label class="input-label">1080p ($/s)</label>
-              <input
-                v-model.number="editForm.video_price_1080p"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_1080p')"
-              />
-            </div>
-          </div>
+          <RouterLink to="/admin/model-pricing" class="text-sm text-primary-600">模型基础价格</RouterLink>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            <div class="mb-1 font-medium">
-              {{ t(videoPricingI18nKey("finalPricePreview")) }}
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div
-                v-for="item in editVideoFinalPricePreview"
-                :key="item.label"
-              >
-                {{ item.label }}: {{ item.value }}
-              </div>
-            </div>
-          </div>
+
         </div>
 
         <!-- 高峰时段倍率配置（仅订阅类型分组） -->
@@ -3603,10 +3419,6 @@ import {
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
-  getDefaultImagePreviewPrice,
-  getDefaultVideoPreviewPrice,
-  getImagePricePlaceholder,
-  getVideoPricePlaceholder,
   imagePricingI18nKey,
   supportsImagePricingPlatform,
   supportsVideoPricingPlatform,
@@ -4410,27 +4222,8 @@ type ImagePricingFormState = {
   peak_rate_multiplier: number;
 };
 
-type VideoPricingFormState = {
-  platform: GroupPlatform;
-  rate_multiplier: number;
-  video_rate_independent: boolean;
-  video_rate_multiplier: number;
-  video_price_480p: number | string | null;
-  video_price_720p: number | string | null;
-  video_price_1080p: number | string | null;
-};
 
-const imagePricingTiers = [
-  { key: "image_price_1k", label: "1K" },
-  { key: "image_price_2k", label: "2K" },
-  { key: "image_price_4k", label: "4K" },
-] as const;
 
-const videoPricingTiers = [
-  { key: "video_price_480p", label: "480p" },
-  { key: "video_price_720p", label: "720p" },
-  { key: "video_price_1080p", label: "1080p" },
-] as const;
 
 const normalizePreviewNumber = (value: number | string | null | undefined, fallback = 0) => {
   if (value === null || value === undefined || value === "") {
@@ -4459,64 +4252,6 @@ const formatImagePricePreview = (value: number | string | null | undefined) => {
   return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
 };
 
-const formatVideoPricePreview = (value: number | string | null | undefined) => {
-  if (value === null || value === undefined || value === "") {
-    return t("admin.groups.videoPricing.notConfigured");
-  }
-  const price = Number(value);
-  if (!Number.isFinite(price) || price < 0) {
-    return t("admin.groups.videoPricing.notConfigured");
-  }
-  return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
-};
-
-const buildImageFinalPricePreview = (form: ImagePricingFormState) => {
-  const imageMultiplier = form.image_rate_independent
-    ? normalizePreviewNumber(form.image_rate_multiplier, 1)
-    : normalizePreviewNumber(form.rate_multiplier, 1);
-  const multiplier = imageMultiplier;
-  return imagePricingTiers.map((tier) => {
-    const basePrice =
-      parsePreviewPrice(form[tier.key]) ??
-      getDefaultImagePreviewPrice(form.platform, tier.key);
-    return {
-      label: tier.label,
-      value: basePrice !== null
-        ? formatImagePricePreview(basePrice * multiplier)
-        : t("admin.groups.imagePricing.notConfigured"),
-    };
-  });
-};
-
-const buildVideoFinalPricePreview = (form: VideoPricingFormState) => {
-  const multiplier = form.video_rate_independent
-    ? normalizePreviewNumber(form.video_rate_multiplier, 1)
-    : normalizePreviewNumber(form.rate_multiplier, 1);
-  return videoPricingTiers.map((tier) => {
-    const basePrice =
-      parsePreviewPrice(form[tier.key]) ??
-      getDefaultVideoPreviewPrice(form.platform, tier.key);
-    return {
-      label: tier.label,
-      value: basePrice !== null
-        ? formatVideoPricePreview(basePrice * multiplier)
-        : t("admin.groups.videoPricing.notConfigured"),
-    };
-  });
-};
-
-const createImageFinalPricePreview = computed(() =>
-  buildImageFinalPricePreview(createForm),
-);
-const editImageFinalPricePreview = computed(() =>
-  buildImageFinalPricePreview(editForm),
-);
-const createVideoFinalPricePreview = computed(() =>
-  buildVideoFinalPricePreview(createForm),
-);
-const editVideoFinalPricePreview = computed(() =>
-  buildVideoFinalPricePreview(editForm),
-);
 
 // Codex 网页搜索单次默认价（与后端 defaultWebSearchPricePerCall 一致，官方 $10/1000 次）
 const DEFAULT_WEB_SEARCH_PRICE_PER_CALL = 0.01;

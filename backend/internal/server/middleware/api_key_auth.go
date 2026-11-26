@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -84,6 +85,22 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
 		// IP 限制等早退中断，也让 Ops 错误日志能回退取到 user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
+		if sep := apiKeyService.SEPService(); sep != nil {
+			apiKey, err = sep.AuthorizeGateway(c.Request.Context(), c.Request, apiKey)
+			if err != nil {
+				writeSEPAuthError(c, err)
+				return
+			}
+			if apiKey.SEP != nil && apiKey.SEP.ComputeRequestID != "" {
+				c.Request = c.Request.WithContext(service.WithBasePriceSnapshot(service.WithSEPExecution(c.Request.Context(), apiKey.SEP), apiKey.SEP.Price))
+				c.Header("X-Compute-Request-ID", apiKey.SEP.ComputeRequestID)
+				defer func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					sep.FinishGateway(ctx, apiKey.SEP, c.Writer.Status())
+				}()
+			}
+		}
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
@@ -136,7 +153,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
-		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
+		skipBilling := apiKey.SEP != nil || c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -161,7 +178,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 
 		// 倍率自省不需要订阅数据；/v1/usage 仍保留原有订阅读取行为。
-		if isSubscriptionType && subscriptionService != nil && !billingInfoRequest {
+		if isSubscriptionType && subscriptionService != nil && !billingInfoRequest && apiKey.SEP == nil {
 			sub, subErr := subscriptionService.GetActiveSubscription(
 				c.Request.Context(),
 				apiKey.User.ID,

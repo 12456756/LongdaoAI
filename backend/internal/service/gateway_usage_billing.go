@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -289,6 +290,25 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
+	if p.APIKey != nil && p.APIKey.SEP != nil {
+		e := p.APIKey.SEP
+		if e.Service == nil || e.ComputeRequestID == "" {
+			return false, errors.New("SEP execution context missing")
+		}
+		billingCtx, cancel := detachedBillingContext(ctx)
+		defer cancel()
+		if e.MediaBillingRequestID != "" && (cmd.DeferredVideo || cmd.DeferredImage) {
+			cmd.RequestID = e.MediaBillingRequestID
+		}
+		result, err := e.Service.FinalizeUsage(billingCtx, e, cmd, usageLog)
+		if err != nil {
+			return false, err
+		}
+		if deps.deferredService != nil {
+			deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		}
+		return result != nil && result.Applied, nil
+	}
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		postUsageBilling(ctx, p, deps)
 		return true, nil
@@ -640,6 +660,7 @@ type recordUsageCoreInput struct {
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // LongContextThreshold > 0 时 Token 计费回退走 CalculateCostWithLongContext。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput, opts *recordUsageOpts) error {
+	ctx = SEPUsageContext(ctx, input.APIKey)
 	result := input.Result
 	apiKey := input.APIKey
 	user := input.User
@@ -676,6 +697,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+	multiplier, imageMultiplier, _ = SEPRequestMultipliers(apiKey, multiplier, imageMultiplier, 1)
 
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -693,7 +715,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 计算费用
-	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	cost := &CostBreakdown{BillingMode: string(BillingModeToken)}
+	if !s.billingService.UsesManagedBasePrices() || s.cfg == nil || s.cfg.RunMode != config.RunModeSimple {
+		cost = s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	}
+	if cost.Error != nil {
+		return cost.Error
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -739,6 +767,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 	requestID := usageLog.RequestID
+	if p := BasePriceSnapshot(ctx); p != nil && s.billingService.UsesManagedBasePrices() {
+		if _, err := s.billingService.basePrices.RememberSnapshot(ctx, apiKey.ID, user.ID, requestID, p); err != nil {
+			return ErrBasePriceUnavailable.WithCause(err)
+		}
+	}
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                  cost,
 		User:                  user,
@@ -770,6 +803,38 @@ func (s *GatewayService) calculateRecordUsageCost(
 	imageMultiplier float64,
 	opts *recordUsageOpts,
 ) *CostBreakdown {
+	if s.billingService.UsesManagedBasePrices() {
+		p, err := s.billingService.BasePrice(ctx, billingModel)
+		if err != nil {
+			return &CostBreakdown{Error: err}
+		}
+		rate := multiplier
+		tier := ""
+		count := 1
+		if result.ImageCount > 0 {
+			tier = NormalizeImageBillingTierOrDefault(result.ImageSize)
+			count = result.ImageCount
+			if p.Price.Mode != BillingModeToken {
+				rate = imageMultiplier
+			}
+		}
+		tokens := UsageTokens{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, CacheReadTokens: result.Usage.CacheReadInputTokens, CacheCreationTokens: result.Usage.CacheCreationInputTokens, CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens, ImageOutputTokens: result.Usage.ImageOutputTokens}
+		if p.Price.Mode == BillingModeToken && opts != nil && opts.LongContextThreshold > 0 {
+			cost, err := calculateSplitLongContextCost(tokens, rate, opts.LongContextThreshold, opts.LongContextMultiplier, func(part UsageTokens, partRate float64) (*CostBreakdown, error) {
+				return s.billingService.CalculateBasePrice(ctx, billingModel, tier, part, count, 0, partRate, "")
+			})
+			if err != nil {
+				return &CostBreakdown{Error: err}
+			}
+			cost.BillingMode = string(BillingModeToken)
+			return cost
+		}
+		cost, err := s.billingService.CalculateBasePrice(ctx, billingModel, tier, tokens, count, 0, rate, "")
+		if err != nil {
+			return &CostBreakdown{Error: err}
+		}
+		return cost
+	}
 	// 图片生成：渠道定价为 token 计费时走 token 路径，否则走图片计费
 	if result.ImageCount > 0 {
 		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken {
@@ -904,7 +969,7 @@ func (s *GatewayService) buildRecordUsageLog(
 	opts *recordUsageOpts,
 ) *UsageLog {
 	durationMs := int(result.Duration.Milliseconds())
-	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	requestID := SEPRequestID(apiKey, resolveUsageBillingRequestID(ctx, result.RequestID))
 	usageLog := &UsageLog{
 		UserID:                user.ID,
 		APIKeyID:              apiKey.ID,

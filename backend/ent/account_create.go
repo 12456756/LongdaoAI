@@ -67,6 +67,20 @@ func (_c *AccountCreate) SetNillableDeletedAt(v *time.Time) *AccountCreate {
 	return _c
 }
 
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (_c *AccountCreate) SetUpstreamCompanyID(v int64) *AccountCreate {
+	_c.mutation.SetUpstreamCompanyID(v)
+	return _c
+}
+
+// SetNillableUpstreamCompanyID sets the "upstream_company_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableUpstreamCompanyID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetUpstreamCompanyID(*v)
+	}
+	return _c
+}
+
 // SetName sets the "name" field.
 func (_c *AccountCreate) SetName(v string) *AccountCreate {
 	_c.mutation.SetName(v)
@@ -697,6 +711,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 		_spec.SetField(account.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
 	}
+	if value, ok := _c.mutation.UpstreamCompanyID(); ok {
+		_spec.SetField(account.FieldUpstreamCompanyID, field.TypeInt64, value)
+		_node.UpstreamCompanyID = &value
+	}
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(account.FieldName, field.TypeString, value)
 		_node.Name = value
@@ -966,6 +984,30 @@ func (u *AccountUpsert) UpdateDeletedAt() *AccountUpsert {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (u *AccountUpsert) ClearDeletedAt() *AccountUpsert {
 	u.SetNull(account.FieldDeletedAt)
+	return u
+}
+
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (u *AccountUpsert) SetUpstreamCompanyID(v int64) *AccountUpsert {
+	u.Set(account.FieldUpstreamCompanyID, v)
+	return u
+}
+
+// UpdateUpstreamCompanyID sets the "upstream_company_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateUpstreamCompanyID() *AccountUpsert {
+	u.SetExcluded(account.FieldUpstreamCompanyID)
+	return u
+}
+
+// AddUpstreamCompanyID adds v to the "upstream_company_id" field.
+func (u *AccountUpsert) AddUpstreamCompanyID(v int64) *AccountUpsert {
+	u.Add(account.FieldUpstreamCompanyID, v)
+	return u
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (u *AccountUpsert) ClearUpstreamCompanyID() *AccountUpsert {
+	u.SetNull(account.FieldUpstreamCompanyID)
 	return u
 }
 
@@ -1508,6 +1550,34 @@ func (u *AccountUpsertOne) UpdateDeletedAt() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearDeletedAt() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (u *AccountUpsertOne) SetUpstreamCompanyID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUpstreamCompanyID(v)
+	})
+}
+
+// AddUpstreamCompanyID adds v to the "upstream_company_id" field.
+func (u *AccountUpsertOne) AddUpstreamCompanyID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddUpstreamCompanyID(v)
+	})
+}
+
+// UpdateUpstreamCompanyID sets the "upstream_company_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateUpstreamCompanyID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUpstreamCompanyID()
+	})
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (u *AccountUpsertOne) ClearUpstreamCompanyID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearUpstreamCompanyID()
 	})
 }
 
@@ -2293,6 +2363,34 @@ func (u *AccountUpsertBulk) UpdateDeletedAt() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearDeletedAt() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetUpstreamCompanyID sets the "upstream_company_id" field.
+func (u *AccountUpsertBulk) SetUpstreamCompanyID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUpstreamCompanyID(v)
+	})
+}
+
+// AddUpstreamCompanyID adds v to the "upstream_company_id" field.
+func (u *AccountUpsertBulk) AddUpstreamCompanyID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddUpstreamCompanyID(v)
+	})
+}
+
+// UpdateUpstreamCompanyID sets the "upstream_company_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateUpstreamCompanyID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUpstreamCompanyID()
+	})
+}
+
+// ClearUpstreamCompanyID clears the value of the "upstream_company_id" field.
+func (u *AccountUpsertBulk) ClearUpstreamCompanyID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearUpstreamCompanyID()
 	})
 }
 

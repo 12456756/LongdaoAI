@@ -23,6 +23,17 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
+	if h.SEP != nil {
+		admin.GET("/sep/config", h.SEP.AdminConfig)
+		admin.PUT("/sep/config", h.SEP.AdminConfig)
+		admin.GET("/sep/enterprises", h.SEP.AdminEnterprises)
+		admin.GET("/sep/enterprises/:enterpriseId", h.SEP.AdminEnterprise)
+		admin.PUT("/sep/enterprises/:enterpriseId", h.SEP.AdminEnterprise)
+		admin.GET("/sep/enterprises/:enterpriseId/ledger", h.SEP.AdminLedger)
+		admin.GET("/sep/enterprises/:enterpriseId/balance-events", h.SEP.BalanceEvents)
+		admin.POST("/sep/balance-events/:eventId/retry", h.SEP.RetryBalanceEvent)
+		admin.GET("/sep/balance-events/signing-key", h.SEP.EventSigningKey)
+	}
 	{
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
@@ -101,6 +112,14 @@ func RegisterAdminRoutes(
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)
+		admin.GET("/upstream-companies", h.Admin.Channel.UpstreamCompanies)
+		admin.POST("/upstream-companies", h.Admin.Channel.UpstreamCompanies)
+		admin.DELETE("/upstream-companies/:id", h.Admin.Channel.UpstreamCompanies)
+		admin.GET("/model-pricing", h.Admin.Channel.ModelPriceCatalog)
+		admin.GET("/model-pricing/exchange-rate", h.Admin.Channel.ModelPriceExchangeRate)
+		admin.PUT("/model-pricing/base-price", h.Admin.Channel.SelectModelBasePrice)
+		admin.GET("/model-pricing/history", h.Admin.Channel.ModelBasePriceHistory)
+		admin.GET("/accounts/:id/model-prices", h.Admin.Channel.AccountModelPrices)
 
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)

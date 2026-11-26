@@ -119,6 +119,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
+	ctx = SEPUsageContext(ctx, input.APIKey)
+	if input.APIKey != nil && input.APIKey.SEP != nil && input.Result != nil {
+		taskID := input.Result.ResponseID
+		if input.DeferredImage {
+			taskID = ""
+		}
+		if err := input.APIKey.SEP.Service.RecordExecutionProvider(ctx, input.APIKey, input.Result.RequestID, taskID); err != nil {
+			return err
+		}
+	}
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
@@ -165,6 +175,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	baseMultiplier := multiplier
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, timezone.Now())
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+	multiplier, imageMultiplier, videoMultiplier = SEPRequestMultipliers(apiKey, multiplier, imageMultiplier, videoMultiplier)
 
 	var cost *CostBreakdown
 	var err error
@@ -210,6 +221,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			return err
 		}
 		videoMultiplier = input.FrozenVideoBilling.multiplier
+	} else if s.billingService.UsesManagedBasePrices() && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	} else {
 		cost, err = s.calculateOpenAIRecordUsageCost(
 			ctx,
@@ -226,6 +239,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 	if err != nil {
+		if apiKey.SEP != nil {
+			return err
+		}
 		if !isUsagePricingUnavailableError(err) {
 			return err
 		}
@@ -251,10 +267,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Create usage log
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
-	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	requestID := SEPRequestID(apiKey, resolveUsageBillingRequestID(ctx, result.RequestID))
 	if result.OpenAIWSMode {
 		if upstreamRequestID := strings.TrimSpace(result.RequestID); upstreamRequestID != "" {
 			requestID = upstreamRequestID
+		}
+	}
+	if p := BasePriceSnapshot(ctx); p != nil && s.billingService.UsesManagedBasePrices() {
+		if _, err := s.billingService.basePrices.RememberSnapshot(ctx, apiKey.ID, user.ID, requestID, p); err != nil {
+			return ErrBasePriceUnavailable.WithCause(err)
 		}
 	}
 
@@ -427,6 +448,35 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	serviceTier string,
 	longContextBillingEnabled bool,
 ) (*CostBreakdown, error) {
+	if s.billingService.UsesManagedBasePrices() && (result == nil || result.WebSearchCalls == 0) {
+		model := firstUsageBillingModel(billingModels)
+		p, err := s.billingService.BasePrice(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		tier := ""
+		count, seconds := 1, 0
+		rate := multiplier
+		if result.VideoCount > 0 {
+			tier = NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
+			count = result.VideoCount
+			seconds = normalizeVideoUsageDurationSeconds(model, result.VideoDurationSeconds)
+			if p.Price.Mode != BillingModeToken {
+				rate = videoMultiplier
+			}
+		} else if result.ImageCount > 0 {
+			tier = NormalizeImageBillingTierOrDefault(result.ImageSize)
+			count = result.ImageCount
+			if p.Price.Mode != BillingModeToken {
+				rate = imageMultiplier
+			}
+		}
+		cost, err := s.billingService.CalculateBasePrice(ctx, model, tier, tokens, count, seconds, rate, serviceTier, longContextBillingEnabled)
+		if cost != nil && result.VideoCount > 0 && p.Price.Mode != BillingModeToken {
+			cost.BillingMode = string(BillingModeVideo)
+		}
+		return cost, err
+	}
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
