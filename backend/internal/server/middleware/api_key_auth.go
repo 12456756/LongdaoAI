@@ -92,12 +92,15 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				return
 			}
 			if apiKey.SEP != nil && apiKey.SEP.ComputeRequestID != "" {
+				if apiKey.SEP.ReplayOnly {
+					c.Header("X-Client-Request-ID", c.Request.Header.Get("X-Client-Request-ID"))
+				}
 				c.Request = c.Request.WithContext(service.WithBasePriceSnapshot(service.WithSEPExecution(c.Request.Context(), apiKey.SEP), apiKey.SEP.Price))
 				c.Header("X-Compute-Request-ID", apiKey.SEP.ComputeRequestID)
 				defer func() {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
-					sep.FinishGateway(ctx, apiKey.SEP, c.Writer.Status())
+					sep.FinishGateway(ctx, apiKey, c.Writer.Status())
 				}()
 			}
 		}

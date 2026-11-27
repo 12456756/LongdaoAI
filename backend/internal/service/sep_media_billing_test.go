@@ -135,7 +135,7 @@ func sepMediaFixture(t *testing.T, kind, origin string, key *APIKey, account *Ac
 CREATE TABLE usage_logs(request_id TEXT,api_key_id BIGINT,actual_cost NUMERIC,total_cost NUMERIC,video_duration_seconds INT,video_resolution TEXT);
 UPDATE api_keys SET user_id=1 WHERE id=1; INSERT INTO accounts(id) VALUES(5) ON CONFLICT DO NOTHING;`)
 	require.NoError(t, err)
-	for _, name := range []string{"186_sep_quotes_and_pending_media.sql", "187_sep_task_group_snapshot.sql", "182_video_request_billing.sql", "183_image_request_billing.sql"} {
+	for _, name := range []string{"186_sep_quotes_and_pending_media.sql", "187_sep_task_group_snapshot.sql", "188_sep_quote_multiplier_and_validation.sql", "182_video_request_billing.sql", "183_image_request_billing.sql"} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		require.NoError(t, err)
 		_, err = db.Exec(string(raw))

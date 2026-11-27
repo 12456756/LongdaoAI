@@ -35,8 +35,16 @@ func (h *OpenAIGatewayHandler) MediaReceiptMiddleware() gin.HandlerFunc {
 			c.Set("media_receipt_persisted", true)
 			receipt["http_status"] = status
 			key, authenticated := middleware2.GetAPIKeyFromContext(c)
+			if !authenticated {
+				key, authenticated = middleware2.GetSEPRejectedMediaKey(c)
+			}
 			if authenticated && key != nil && h != nil && h.gatewayService != nil && !c.GetBool("media_receipt_billable") {
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 3*time.Second)
+				if key.SEP != nil {
+					if err := key.SEP.Service.FinalizeRejectedMediaReceipt(ctx, key, receipt); err != nil {
+						receipt["enterprise_billing_error"] = map[string]any{"source": "platform", "code": "sep_billing_finalize_error", "message": errordetail.Text(err.Error())}
+					}
+				}
 				err := h.gatewayService.SaveMediaFailure(ctx, key, kind, receipt)
 				cancel()
 				if err != nil {

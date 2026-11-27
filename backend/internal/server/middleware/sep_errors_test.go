@@ -64,3 +64,28 @@ func TestSEPErrorRedactsDiagnosticsAndDoesNotLoseCause(t *testing.T) {
 		}
 	}
 }
+
+func TestSEPMediaErrorSeparatesClientIdentityFromPlatformTrace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, path := range []string{"/v1/images/edits/async", "/v1/videos", "/v1/images/tasks/original?id_type=request_id"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+			ctx := context.WithValue(c.Request.Context(), ctxkey.RequestID, "platform-trace")
+			ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "sep-original")
+			c.Request = c.Request.WithContext(ctx)
+			WriteSEPError(c, service.SEPFailure(409, "QUOTE_MISMATCH", "Image operation differs from quote", "quote"), "receive")
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, "sep-original", body["request_id"])
+			require.Equal(t, "platform-trace", body["platform_request_id"])
+			require.Equal(t, "platform-trace", rec.Header().Get("X-Request-ID"))
+			require.EqualValues(t, 2, body["schema_version"])
+			require.Equal(t, "QUOTE_MISMATCH", body["error"].(map[string]any)["code"])
+			require.Contains(t, body, "submission_error")
+			_, ok := GetSEPRejectedMediaKey(c)
+			require.False(t, ok, "A plain error must not authorize rejection persistence")
+		})
+	}
+}

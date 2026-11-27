@@ -1,0 +1,80 @@
+//go:build unit
+
+package service
+
+import (
+	"encoding/json"
+	"os"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
+)
+
+// Opt-in offline migration export. Inputs contain model/rate metadata only;
+// supplier credentials and customer records are neither needed nor exported.
+func TestDeploymentExportLegacyPrices(t *testing.T) {
+	dir := os.Getenv("LONGDAO_DEPLOYMENT_PRICE_DIR")
+	if dir == "" {
+		t.Skip("offline deployment export is not requested")
+	}
+	var inventory struct {
+		Accounts []struct {
+			ID      int64             `json:"id"`
+			Mapping map[string]string `json:"model_mapping"`
+		} `json:"accounts"`
+		Recent []struct {
+			Model string `json:"model"`
+		} `json:"recent_models"`
+	}
+	raw, err := os.ReadFile(dir + "/pricing-inventory.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &inventory))
+	pricing := NewPricingService(&config.Config{}, nil)
+	require.NoError(t, pricing.loadPricingData(dir+"/model_pricing.json"))
+	billing := NewBillingService(&config.Config{}, pricing)
+	models := map[string]bool{}
+	for _, account := range inventory.Accounts {
+		for model := range account.Mapping {
+			if !strings.ContainsAny(model, "*?") {
+				models[model] = true
+			}
+		}
+	}
+	for _, recent := range inventory.Recent {
+		models[recent.Model] = true
+	}
+	type entry struct {
+		Model  string            `json:"model"`
+		Token  *ModelPricing     `json:"token,omitempty"`
+		Images map[string]string `json:"images,omitempty"`
+		Error  string            `json:"error,omitempty"`
+	}
+	var result []entry
+	for model := range models {
+		e := entry{Model: model}
+		lower := strings.ToLower(model)
+		if strings.Contains(lower, "image") || strings.Contains(lower, "imagen") || lower == "grok-imagine" || strings.Contains(lower, "imagine-edit") {
+			e.Images = map[string]string{}
+			for _, tier := range []string{"1K", "2K", "4K"} {
+				e.Images[tier] = decimal.NewFromFloat(billing.CalculateImageCost(model, tier, 1, nil, 1).TotalCost).String()
+			}
+		} else if strings.Contains(lower, "seedance") || strings.Contains(lower, "imagine-video") || lower == "minimax-h3" {
+			// Per-group video prices are copied from the inventory by the importer.
+		} else {
+			e.Token, err = billing.GetModelPricing(model)
+			if err != nil {
+				e.Error = err.Error()
+			}
+		}
+		result = append(result, e)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Model < result[j].Model })
+	out, err := json.MarshalIndent(result, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(dir+"/legacy-effective-prices.json", out, 0600))
+	t.Logf("Exported %d models without upstream requests", len(result))
+}

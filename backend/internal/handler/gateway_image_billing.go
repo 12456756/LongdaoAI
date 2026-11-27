@@ -132,7 +132,7 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.JSON(200, v)
+		service.WriteMediaJSON(c, 200, v)
 		return
 	}
 	if key.SEP != nil {
@@ -142,7 +142,7 @@ func (h *GatewayHandler) ImagePricing(c *gin.Context) {
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.JSON(200, value)
+		service.WriteMediaJSON(c, 200, value)
 		return
 	}
 	c.Header("Cache-Control", "no-store")

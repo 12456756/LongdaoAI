@@ -1,6 +1,8 @@
 # SEP 视频接口契约（脑生云旧协议）
 
-本次修改仅覆盖 `naoshengyun_legacy` 视频协议。原生视频协议保持现有转发和计费方式；其任务不支持本次新增的取消能力，返回具体的 `unsupported_video_operation`。
+本文原始修改仅覆盖 `naoshengyun_legacy` 视频协议。原生视频任务不支持本次新增的取消能力，返回具体的 `unsupported_video_operation`。
+
+2026-11-26 补充（SEP 企业账单、`openai_videos` 通道）：查询确认任务 `failed/cancelled/canceled` 后，尚未确认的本地费用按平台失败不收费规则生成最终零元人民币账单，不再无限停留在 reconciling；上游自行扣款不转嫁给用户。本地已经确认的收费账单保持原账单编号和实际金额，不因后来的任务失败被覆盖。任务查询回执的 `billing` 读取原 Key、原任务对应的本地账单，不采信供应商正文中同名 billing 字段。最终人民币金额仍从已有 SEP 执行账单查询接口读取 `fee_status/gross_cny/bill_id`。结算事务失败或复查网络错误时，账单保留 reconciling 和具体 `billing_error`，不据此认定零费用；后续查询原账单可再次核对、补齐结算，只查询任务，不重新创建。结算成功清除旧核对错误，任务本身的失败原因继续保留在 `task_error`。
 
 2026-11-24 补充：错误及成功 JSON 的统一回执、前置鉴权错误和本地失败记录恢复，以 [完整回执契约](sep-media-receipt-contract-20261124.md) 为准；原生视频也补齐回执元信息，不改变其按原方式计费的时点。
 

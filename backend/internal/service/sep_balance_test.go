@@ -71,7 +71,7 @@ CREATE TABLE payment_orders(id BIGINT PRIMARY KEY,user_id BIGINT);
 CREATE TABLE redeem_codes(id BIGINT PRIMARY KEY,type TEXT,status TEXT,used_by BIGINT,used_at TIMESTAMPTZ,expires_at TIMESTAMPTZ);
 INSERT INTO users(id) VALUES(1),(2); INSERT INTO accounts VALUES(1);`)
 	require.NoError(t, err)
-	for _, name := range []string{"185_sep_enterprise_settlement.sql", "190_sep_ledger_entry_types.sql", "192_sep_balance_events.sql", "195_sep_pending_settlements.sql", "196_sep_credential_rotations.sql"} {
+	for _, name := range []string{"185_sep_enterprise_settlement.sql", "189_sep_dispatch_claim.sql", "190_sep_ledger_entry_types.sql", "192_sep_balance_events.sql", "195_sep_pending_settlements.sql", "196_sep_credential_rotations.sql", "197_sep_media_recovery_identity.sql"} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		require.NoError(t, err)
 		_, err = db.Exec(string(raw))

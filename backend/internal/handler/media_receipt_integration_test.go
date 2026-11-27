@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -282,4 +283,82 @@ func TestMediaReceiptErrorAfterJSONKeepaliveAndSSEHeaders(t *testing.T) {
 		}
 		require.Contains(t, w.Body.String(), "GPU worker disconnected")
 	}
+}
+
+func TestSEPQuoteRejectionRecoveryRetainsOriginalIdentityReasonAndZeroFee(t *testing.T) {
+	_, key, upstream, _, _, h := newAsyncImageHTTPFixture(t)
+	router := gin.New()
+	router.Use(middleware2.ClientRequestID(), h.openAI.MediaReceiptMiddleware())
+	rejections := 0
+	router.POST("/v1/images/edits/async", func(c *gin.Context) {
+		rejections++
+		middleware2.SetOpsFallbackAPIKey(c, key)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, "platform-trace"))
+		// The service supplies this rejection-only identity after enterprise
+		// authentication. It does not grant the handler permission to generate.
+		rejectedKey := *key
+		rejectedKey.SEP = &service.SEPExecution{Service: service.NewSEPService(nil, nil, nil, &service.APIKeyService{}, nil, nil)}
+		failure := &service.SEPRejectedMediaError{Key: &rejectedKey, Cause: service.SEPFailure(409, "QUOTE_MISMATCH", "Image operation differs from quote", "quote")}
+		middleware2.WriteSEPError(c, failure, "receive")
+		_, authenticated := middleware2.GetAPIKeyFromContext(c)
+		require.False(t, authenticated)
+	})
+	router.GET("/v1/images/tasks/:task_id", func(c *gin.Context) {
+		c.Set(string(middleware2.ContextKeyAPIKey), key)
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: key.UserID})
+		h.Get(c)
+	})
+	perform := func(method, path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, nil)
+		r.Header.Set("X-Client-Request-ID", "sep-original")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		return w
+	}
+	failed := perform("POST", "/v1/images/edits/async")
+	require.Equal(t, 409, failed.Code, failed.Body.String())
+	receipt := requireCompleteMediaReceipt(t, failed)
+	require.Equal(t, "sep-original", receipt["request_id"])
+	require.Equal(t, "platform-trace", failed.Header().Get("X-Request-ID"))
+	require.Equal(t, "not_submitted", receipt["submission_status"])
+	require.Equal(t, "not_charged", receipt["billing"].(map[string]any)["status"])
+	for i := 0; i < 2; i++ {
+		query := perform("GET", "/v1/images/tasks/sep-original?id_type=request_id")
+		require.Equal(t, 200, query.Code, query.Body.String())
+		recovered := requireCompleteMediaReceipt(t, query)
+		require.Equal(t, "sep-original", recovered["request_id"])
+		require.Equal(t, "not_submitted", recovered["submission_status"])
+		require.Equal(t, "not_charged", recovered["billing"].(map[string]any)["status"])
+		require.Equal(t, "0", recovered["billing"].(map[string]any)["actual_cost_usd"])
+		require.Equal(t, "QUOTE_MISMATCH", recovered["submission_error"].(map[string]any)["code"])
+		require.Nil(t, recovered["operation_error"])
+		require.EqualValues(t, 409, recovered["http_status"])
+	}
+	key.ID++
+	otherKey := perform("GET", "/v1/images/tasks/sep-original?id_type=request_id")
+	require.Equal(t, 404, otherKey.Code)
+	require.NotContains(t, otherKey.Body.String(), "QUOTE_MISMATCH")
+	key.ID--
+	require.Empty(t, upstream.calls)
+	require.Equal(t, 1, rejections)
+}
+
+func TestSEPMediaAuthFailureDoesNotPersistFromLoggingFallbackKey(t *testing.T) {
+	_, key, upstream, _, _, h := newAsyncImageHTTPFixture(t)
+	router := gin.New()
+	router.Use(middleware2.ClientRequestID(), h.openAI.MediaReceiptMiddleware())
+	router.POST("/v1/images/edits/async", func(c *gin.Context) {
+		middleware2.SetOpsFallbackAPIKey(c, key)
+		middleware2.WriteSEPError(c, service.SEPFailure(401, "INVALID_SERVICE_SIGNATURE", "Service signature is invalid", "authenticate"), "receive")
+	})
+	r := httptest.NewRequest("POST", "/v1/images/edits/async", nil)
+	r.Header.Set("X-Client-Request-ID", "unverified-original")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, r)
+	require.Equal(t, 401, w.Code)
+	require.Equal(t, "unverified-original", requireCompleteMediaReceipt(t, w)["request_id"])
+	saved, err := h.openAI.gatewayService.MediaFailure(t.Context(), key, "image", "unverified-original")
+	require.NoError(t, err)
+	require.Nil(t, saved)
+	require.Empty(t, upstream.calls)
 }

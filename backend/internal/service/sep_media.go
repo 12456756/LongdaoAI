@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -124,7 +126,7 @@ func (s *SEPService) VerifyMediaQuote(ctx context.Context, r *http.Request, body
 	}
 	if kind == "image" {
 		operation := "generate"
-		if strings.HasSuffix(r.URL.Path, "/edits") {
+		if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/async"), "/edits") {
 			operation = "edit"
 		}
 		if spec["operation"] != operation {
@@ -189,28 +191,52 @@ func (s *SEPService) refreshVideoBilling(ctx context.Context, integration, execu
 	if s.RefreshVideo == nil {
 		return
 	}
-	var task, enterprise string
+	var id, task, enterprise string
 	var keyID, pk int64
-	err := s.db.QueryRowContext(ctx, `SELECT task_id,api_key_id,enterprise_pk,e.enterprise_id FROM sep_executions x JOIN sep_enterprises e ON e.id=x.enterprise_pk WHERE x.integration_id=$1 AND execution_id=$2 AND kind='video' AND fee_status<>'final' AND task_id IS NOT NULL`, integration, executionID).Scan(&task, &keyID, &pk, &enterprise)
+	err := s.db.QueryRowContext(ctx, `SELECT x.id,task_id,api_key_id,enterprise_pk,e.enterprise_id FROM sep_executions x JOIN sep_enterprises e ON e.id=x.enterprise_pk WHERE x.integration_id=$1 AND execution_id=$2 AND kind='video' AND fee_status<>'final' AND task_id IS NOT NULL`, integration, executionID).Scan(&id, &task, &keyID, &pk, &enterprise)
 	if err != nil {
+		return
+	}
+	remember := func(err error) {
+		if saveErr := s.rememberVideoBillingProblem(ctx, id, "", err); saveErr != nil {
+			slog.Error("sep.video_billing_refresh_failed", "compute_request_id", id, "reason", safeVideoError(errors.Join(err, saveErr)))
+		}
+	}
+	if s.keys == nil || s.keys.apiKeyRepo == nil {
+		remember(errors.New("Restore original video credential: API key repository is unavailable"))
 		return
 	}
 	key, err := s.keys.apiKeyRepo.GetByID(ctx, keyID)
 	if err != nil {
+		remember(fmt.Errorf("Restore original video credential: %w", err))
 		return
 	}
+	if key == nil {
+		remember(errors.New("Restore original video credential: original API key was not found"))
+		return
+	}
+	copyKey := *key
+	key = &copyKey
 	key.SEP = &SEPExecution{EnterprisePK: pk, EnterpriseID: enterprise, IntegrationID: integration, Kind: "video", Service: s}
 	refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	_ = s.RefreshVideo(refreshCtx, key, task)
+	if err = s.RefreshVideo(refreshCtx, key, task); err != nil {
+		remember(fmt.Errorf("Refresh original video task %s: %w", task, err))
+	}
 }
-func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID string, body []byte) error {
+func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID string, body []byte) (resultErr error) {
 	if key == nil || key.SEP == nil || taskID == "" {
 		return nil
 	}
-	state := strings.ToLower(gjson.GetBytes(body, "status").String())
+	if !gjson.ValidBytes(body) {
+		return errors.New("Video query returned invalid JSON; task status and billing cannot be confirmed")
+	}
+	state := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "status").String()))
 	if state == "" {
-		state = strings.ToLower(gjson.GetBytes(body, "data.status").String())
+		state = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "data.status").String()))
+	}
+	if state == "canceled" {
+		state = "cancelled"
 	}
 	if state != "completed" && state != "succeeded" && state != "success" && state != "failed" && state != "cancelled" {
 		return nil
@@ -218,20 +244,21 @@ func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID strin
 	var e SEPExecution
 	var priceData, multiplierData, pendingData []byte
 	var origin string
-	err := s.db.QueryRowContext(ctx, `SELECT id,execution_id,model,exchange_rate::text,price_snapshot,multiplier_snapshot,pending_usage,billing_origin FROM sep_executions WHERE enterprise_pk=$1 AND task_id=$2 AND fee_status<>'final'`, key.SEP.EnterprisePK, taskID).Scan(&e.ComputeRequestID, &e.ExecutionID, &e.Model, &e.Rate, &priceData, &multiplierData, &pendingData, &origin)
+	var accountID int64
+	err := s.db.QueryRowContext(ctx, `SELECT id,execution_id,model,exchange_rate::text,price_snapshot,multiplier_snapshot,pending_usage,billing_origin,COALESCE(account_id,0) FROM sep_executions WHERE enterprise_pk=$1 AND api_key_id=$2 AND task_id=$3 AND kind='video' AND fee_status<>'final'`, key.SEP.EnterprisePK, key.ID, taskID).Scan(&e.ComputeRequestID, &e.ExecutionID, &e.Model, &e.Rate, &priceData, &multiplierData, &pendingData, &origin, &accountID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if state == "failed" || state == "cancelled" {
-		_, err = s.db.ExecContext(ctx, `UPDATE sep_executions SET execution_status=$1,fee_status='reconciling',resource_version=resource_version+1,updated_at=NOW() WHERE id=$2 AND fee_status<>'final'`, state, e.ComputeRequestID)
-		return err
-	}
-	if len(pendingData) == 0 {
-		return nil
-	}
+	defer func() {
+		if resultErr != nil {
+			if saveErr := s.rememberVideoBillingProblem(ctx, e.ComputeRequestID, state, resultErr); saveErr != nil {
+				resultErr = errors.Join(resultErr, saveErr)
+			}
+		}
+	}()
 	e.Kind = "video"
 	e.DirectBilling = origin == "compute"
 	e.EnterpriseID = key.SEP.EnterpriseID
@@ -239,6 +266,16 @@ func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID strin
 	e.MediaFinal = true
 	e.EnterprisePK = key.SEP.EnterprisePK
 	e.Service = s
+	if state == "failed" || state == "cancelled" {
+		// Failed output is not customer-billable. A supplier debit is not a
+		// customer fee; only an already committed local bill remains immutable.
+		e.MediaTerminalStatus = state
+		_, err = s.FinalizeUsage(ctx, &e, &UsageBillingCommand{RequestID: e.ComputeRequestID, APIKeyID: key.ID, UserID: key.UserID, AccountID: accountID}, nil)
+		return err
+	}
+	if len(pendingData) == 0 {
+		return errors.New("Video completed but the original pending usage record is missing; final fee cannot be calculated")
+	}
 	var price ModelBasePrice
 	var pending sepPendingUsage
 	if err = json.Unmarshal(priceData, &price); err != nil {
@@ -251,10 +288,12 @@ func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID strin
 	if err = json.Unmarshal(pendingData, &pending); err != nil {
 		return err
 	}
+	if pending.Command.APIKeyID != key.ID || pending.Command.UserID != key.UserID || pending.Command.AccountID != accountID {
+		return errors.New("Original video usage identity does not match its execution")
+	}
 	if price.Price.Mode == BillingModeToken {
 		if !gjson.GetBytes(body, "usage").Exists() {
-			_, err = s.db.ExecContext(ctx, `UPDATE sep_executions SET execution_status='completed',fee_status='reconciling',updated_at=NOW(),resource_version=resource_version+1 WHERE id=$1 AND fee_status<>'final'`, e.ComputeRequestID)
-			return err
+			return errors.New("Video completed but upstream token usage is missing; final fee cannot be calculated")
 		}
 		u := extractOpenAIEmbeddingsUsage(body)
 		tokens := UsageTokens{InputTokens: u.InputTokens - u.CacheReadInputTokens - u.CacheCreationInputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadInputTokens, CacheCreationTokens: u.CacheCreationInputTokens, ImageInputTokens: u.ImageInputTokens, ImageOutputTokens: u.ImageOutputTokens}
@@ -274,6 +313,9 @@ func (s *SEPService) ObserveVideo(ctx context.Context, key *APIKey, taskID strin
 			pending.Log.ActualCost = cost.ActualCost
 			pending.Log.TotalCost = cost.TotalCost
 		}
+	}
+	if price.Price.Mode != BillingModeToken && pending.Log == nil {
+		return errors.New("Video completed but the original video duration and resolution record is missing; final fee cannot be calculated")
 	}
 	if pending.Log != nil && price.Price.Mode != BillingModeToken {
 		seconds := 0

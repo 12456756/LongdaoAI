@@ -251,7 +251,7 @@ func videoTaskCacheKey(apiKeyID int64, taskID string) string {
 func (s *OpenAIGatewayService) GetVideoTaskAccount(ctx context.Context, apiKey *APIKey, taskID string) (*Account, error) {
 	if apiKey != nil && apiKey.SEP != nil {
 		_, id, err := apiKey.SEP.Service.RestoreTaskGroup(ctx, apiKey, taskID)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrVideoTaskNotFound) {
 			return nil, err
 		}
 		if id > 0 {
@@ -457,9 +457,16 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, err
 	}
-	if request == nil && apiKey.SEP != nil {
+	if request == nil {
+		if responseID := firstNonEmptyString(gjson.GetBytes(responseBody, "id").String(), gjson.GetBytes(responseBody, "data.id").String()); responseID != "" && responseID != taskID {
+			return nil, videoError(502, "video_protocol_error", "Video query response task ID does not match the requested task; its status cannot be used for billing")
+		}
+	}
+	if request == nil && apiKey != nil && apiKey.SEP != nil {
 		if err = apiKey.SEP.Service.ObserveVideo(ctx, apiKey, taskID, responseBody); err != nil {
-			return nil, err
+			contractFor(c).Billing = billingProblem(err)
+		} else {
+			contractFor(c).Billing = apiKey.SEP.Service.videoTaskBilling(ctx, apiKey, taskID)
 		}
 	}
 	result := &OpenAIForwardResult{RequestID: firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("x-oneapi-request-id")), Model: originalModel, BillingModel: billingModel, UpstreamModel: billingModel, Duration: time.Since(start)}
@@ -495,12 +502,12 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 		}
 		if apiKey.SEP != nil {
 			if err = apiKey.SEP.Service.RecordExecutionProvider(ctx, apiKey, result.RequestID, result.ResponseID); err != nil {
-				return nil, err
+				logger.LegacyPrintf("service.openai_gateway", "save SEP video association failed: task_id=%s err=%v", result.ResponseID, safeVideoError(err))
 			}
 		}
 		if store, storeErr := s.videoStore(); storeErr == nil {
 			now := time.Now().Unix()
-			meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: result.ResponseID, APIKeyID: apiKey.ID, GroupID: derefGroupID(apiKey.GroupID), AccountID: account.ID, Protocol: VideoProtocolOpenAI, RequestedModel: originalModel, UpstreamModel: billingModel, BillingRequestID: resolveUsageBillingRequestID(ctx, result.RequestID), BoundAt: now, ExpiresAt: now + 604800}
+			meta := &VideoTaskMetadata{SchemaVersion: 1, TaskID: result.ResponseID, RequestID: v.RequestID, APIKeyID: apiKey.ID, GroupID: derefGroupID(apiKey.GroupID), AccountID: account.ID, Protocol: VideoProtocolOpenAI, RequestedModel: originalModel, UpstreamModel: billingModel, BillingRequestID: resolveUsageBillingRequestID(ctx, result.RequestID), BoundAt: now, ExpiresAt: now + 604800}
 			metadataCtx, metadataCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			if err := store.VideoBind(metadataCtx, meta); err != nil {
 				logger.LegacyPrintf("service.openai_gateway", "bind native video metadata failed: account_id=%d task_id=%s", account.ID, result.ResponseID)
@@ -521,7 +528,20 @@ func (s *OpenAIGatewayService) ForwardVideo(ctx context.Context, c *gin.Context,
 	if json.Unmarshal(responseBody, &payload) != nil || payload == nil {
 		return nil, errors.New("Video upstream returned a response that is not a JSON object")
 	}
-	if request == nil && UpstreamBodyError(responseBody) && payload["status"] != "failed" {
+	state := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "status").String()))
+	if state == "" {
+		state = strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "data.status").String()))
+	}
+	switch state {
+	case "canceled":
+		state = "cancelled"
+	case "succeeded", "success":
+		state = "completed"
+	}
+	if state != "" {
+		payload["status"] = state
+	}
+	if request == nil && UpstreamBodyError(responseBody) && state != "failed" && state != "cancelled" {
 		CaptureUpstreamError(c, resp.StatusCode, resp.Header, responseBody)
 		UseUpstreamError(c)
 		WriteVideoFailure(c, &videoProtocolError{status: 502, code: "video_upstream_error", message: errordetail.Message(responseBody), diagnostic: map[string]any(GatewayErrorFields(c, "video_upstream_error", errordetail.Message(responseBody)))})

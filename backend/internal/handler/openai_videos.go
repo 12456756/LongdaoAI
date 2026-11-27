@@ -63,11 +63,21 @@ func (h *OpenAIGatewayHandler) Videos(c *gin.Context) {
 		service.WriteVideoError(c, http.StatusBadRequest, "invalid_request_error", "Invalid video task ID")
 		return
 	}
-	if !create && apiKey.SEP != nil {
+	if !create && apiKey.SEP != nil && c.Query("id_type") != "request_id" {
+		restored, _, err := apiKey.SEP.Service.RestoreTaskGroup(ctx, apiKey, taskID)
+		if err != nil && !errors.Is(err, service.ErrVideoTaskNotFound) {
+			service.WriteVideoError(c, 503, "video_task_metadata_unavailable", localDiagnosticMessage("Restore original video task group", err, ""))
+			return
+		}
+		if restored != nil {
+			apiKey = restored
+		}
+	}
+	if !create && apiKey.SEP != nil && c.Query("id_type") == "request_id" {
 		var err error
-		apiKey, _, err = apiKey.SEP.Service.RestoreTaskGroup(ctx, apiKey, taskID)
+		apiKey, err = apiKey.SEP.Service.RestoreVideoRequestGroup(ctx, apiKey, taskID)
 		if err != nil {
-			h.errorResponse(c, 404, "not_found_error", "Video task not found for this enterprise")
+			service.WriteVideoError(c, 503, "video_submission_unavailable", localDiagnosticMessage("Restore original video request group", err, ""))
 			return
 		}
 	}

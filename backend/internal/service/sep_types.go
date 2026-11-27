@@ -168,6 +168,8 @@ type SEPExecution struct {
 	MediaBillingRequestID string          `json:"-"`
 	MediaTerminalStatus   string          `json:"-"`
 	DirectBilling         bool            `json:"-"`
+	ReplayOnly            bool            `json:"-"`
+	MediaRejectionScope   string          `json:"-"`
 }
 type sepContextKey struct{}
 

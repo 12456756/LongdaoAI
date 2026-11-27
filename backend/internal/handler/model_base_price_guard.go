@@ -22,6 +22,10 @@ func (h *GatewayHandler) ModelBasePriceGuard() gin.HandlerFunc {
 			return
 		}
 		path := c.Request.URL.Path
+		if key, ok := middleware.GetAPIKeyFromContext(c); ok && key.SEP != nil && key.SEP.ReplayOnly {
+			c.Next()
+			return
+		}
 		if c.Request.Method != http.MethodPost || strings.Contains(path, "/sub2api/") || strings.Contains(path, "count_tokens") || strings.Contains(path, "/alpha/search") || strings.HasSuffix(path, "/cancel") || strings.HasSuffix(path, "/videos/references") {
 			c.Next()
 			return

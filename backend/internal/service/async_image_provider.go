@@ -367,11 +367,15 @@ func (s *OpenAIGatewayService) SubmitAsyncImage(ctx context.Context, c *gin.Cont
 		return output, nil
 	}
 	if key.SEP != nil {
-		if err = key.SEP.Service.RecordExecutionProvider(ctx, key, "", record.ID); err != nil {
-			return output, imageLocalError(503, "sep_image_association_error", "Save SEP image execution association: "+err.Error())
+		err = key.SEP.Service.RecordExecutionProvider(ctx, key, "", record.ID)
+		if err != nil {
+			err = imageLocalError(503, "sep_image_association_error", "Save SEP image execution association: "+err.Error())
 		}
 	}
-	if err = s.registerAsyncImageBilling(ctx, record); err == nil {
+	if err == nil {
+		err = s.registerAsyncImageBilling(ctx, record)
+	}
+	if err == nil {
 		record.Provider.BillingRegistered = billing != nil
 		record.Provider.DispatchDeadline = time.Now().Add(asyncImageDispatchTimeout + 10*time.Second).Unix()
 		err = tasks.SaveAsync(ctx, record)
@@ -410,6 +414,11 @@ func (s *OpenAIGatewayService) SubmitAsyncImage(ctx context.Context, c *gin.Cont
 			failure = imageLocalError(503, "image_submission_error", err.Error())
 		}
 		failAsyncImage(record, failure)
+		if key.SEP != nil && !record.Provider.BillingRegistered {
+			if billingErr := key.SEP.Service.finalizeUnsubmittedMedia(saveCtx, key); billingErr != nil {
+				failure.Fields["enterprise_billing_error"] = errordetail.Text(billingErr.Error())
+			}
+		}
 		slog.Warn("image_async.submission_failed", "task_id", record.ID, "request_id", requestID, "diagnostic", failure.Fields)
 		output = imageTaskToPublic(record)
 		output.Billing = s.finishAsyncImageBilling(saveCtx, key, account, record, nil)
@@ -455,6 +464,9 @@ func (s *OpenAIGatewayService) ReplayAsyncImage(ctx context.Context, tasks *Imag
 		}
 		if prior != nil {
 			return &ImageTask{SchemaVersion: 2, RequestID: requestID, Billing: &ImageTaskBillingStatus{Status: prior.Status, ActualCostUSD: prior.ActualCostUSD}}, true, imageLocalError(410, "image_task_association_expired", "Original image task association is unavailable; durable billing evidence is preserved and this request will not be submitted again")
+		}
+		if key.SEP != nil && key.SEP.ReplayOnly {
+			return &ImageTask{SchemaVersion: 2, RequestID: requestID, SubmissionStatus: "unobserved", Billing: &ImageTaskBillingStatus{Status: "unknown"}}, true, imageLocalError(410, "image_task_association_expired", "Original image submission receipt is unavailable; this execution will not be submitted again")
 		}
 		return nil, false, nil
 	}

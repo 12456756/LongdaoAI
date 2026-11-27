@@ -10,7 +10,7 @@ type sepCredentialReader interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func checkSEPRotatedCredential(ctx context.Context, db sepCredentialReader, key *APIKey, path string, execute, quote bool) error {
+func checkSEPRotatedCredential(ctx context.Context, db sepCredentialReader, key *APIKey, path string, execute, quote bool, requestLookup ...bool) error {
 	var state string
 	var current bool
 	err := db.QueryRowContext(ctx, `SELECT generation_state,is_current FROM sep_credentials WHERE api_key_id=$1 AND enterprise_pk=$2`, key.ID, key.SEP.EnterprisePK).Scan(&state, &current)
@@ -29,6 +29,11 @@ func checkSEPRotatedCredential(ctx context.Context, db sepCredentialReader, key 
 		}
 		if task == "" {
 			return sepConflict("CREDENTIAL_RETIRED", "旧凭证仅可查询原任务")
+		}
+		// A failed submission can have no task association in SQL. Its Redis
+		// receipt is still scoped to this exact key and verifies ownership.
+		if len(requestLookup) > 0 && requestLookup[0] {
+			return nil
 		}
 		var owns bool
 		if err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sep_executions WHERE enterprise_pk=$1 AND api_key_id=$2 AND task_id=$3)`, key.SEP.EnterprisePK, key.ID, task).Scan(&owns); err != nil {

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -106,6 +107,22 @@ func TestVideoContractHTTPCreateLookupCancelAndOwnership(t *testing.T) {
 	lookup := perform("GET", "/v1/videos/sep-original?id_type=request_id", "")
 	require.Equal(t, 200, lookup.Code, lookup.Body.String())
 	require.Contains(t, lookup.Body.String(), `"status":"in_progress"`)
+	// SEP must let request-ID recovery reach Redis instead of looking for a
+	// provider task whose ID happens to equal the client's request ID.
+	t.Run("SEP request ID lookup", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+		sep := service.NewSEPService(db, nil, sepRecoveryGroupRepo{group: key.Group}, &service.APIKeyService{}, nil, nil)
+		key.SEP = &service.SEPExecution{EnterprisePK: 1, Kind: "video", Service: sep}
+		defer func() { key.SEP = nil }()
+		mock.ExpectQuery("SELECT COALESCE\\(group_id,0\\) FROM sep_executions").WithArgs(int64(1), key.ID, "sep-original").WillReturnRows(sqlmock.NewRows([]string{"group_id"}).AddRow(groupID))
+		mock.ExpectQuery("SELECT COALESCE\\(group_id,0\\),COALESCE\\(account_id,0\\)").WithArgs(int64(1), "mtask_00000000000000000000000000", key.ID).WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id"}).AddRow(groupID, 7))
+		recovered := perform("GET", "/v1/videos/sep-original?id_type=request_id", "")
+		require.Equal(t, 200, recovered.Code, recovered.Body.String())
+		require.Contains(t, recovered.Body.String(), `"task_id":"mtask_00000000000000000000000000"`)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
 	upstream.queryFailure = true
 	failedQuery := perform("GET", "/v1/videos/sep-original?id_type=request_id", "")
 	require.Equal(t, 502, failedQuery.Code, failedQuery.Body.String())
@@ -145,4 +162,13 @@ func TestVideoContractHTTPCreateLookupCancelAndOwnership(t *testing.T) {
 	replay = perform("POST", "/v1/videos", body)
 	require.Equal(t, 502, replay.Code, replay.Body.String())
 	require.Len(t, upstream.methods, count+4)
+}
+
+type sepRecoveryGroupRepo struct {
+	service.GroupRepository
+	group *service.Group
+}
+
+func (r sepRecoveryGroupRepo) GetByID(context.Context, int64) (*service.Group, error) {
+	return r.group, nil
 }

@@ -660,7 +660,7 @@ func (s *OpenAIGatewayService) observeLegacyVideo(ctx context.Context, account *
 	}
 	if key.SEP != nil && meta.Billing == nil {
 		if err = key.SEP.Service.ObserveVideo(ctx, key, id, sepJSON(map[string]any{"status": meta.LastStatus})); err != nil {
-			return nil, nil, err
+			slog.Warn("video_legacy.sep_observation_failed", "task_id", id, "reason", safeVideoError(err))
 		}
 	}
 	if task.Status == "failed" {
@@ -915,7 +915,7 @@ func (s *OpenAIGatewayService) forwardLegacyVideo(ctx context.Context, c *gin.Co
 	}
 	if key.SEP != nil {
 		if err = key.SEP.Service.RecordExecutionProvider(bindCtx, key, "", task.ID); err != nil {
-			return nil, err
+			slog.Warn("video_legacy.sep_association_failed", "task_id", task.ID, "reason", safeVideoError(err))
 		}
 	}
 	s.contractFromTask(bindCtx, c, key, meta, "upstream")

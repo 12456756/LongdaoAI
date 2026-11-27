@@ -52,6 +52,7 @@ func (s *OpenAIGatewayService) createLegacyVideoWithRetry(ctx context.Context, a
 	// the bounded idempotent attempt sequence and persist its outcome anyway.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), videoSubmissionTimeout)
 	defer cancel()
+	ctx = withSEPVideoRetry(ctx)
 	wait := s.videoSubmissionRetryWait
 	if wait == nil {
 		wait = waitVideoSubmissionRetry

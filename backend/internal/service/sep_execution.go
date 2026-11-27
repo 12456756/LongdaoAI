@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"mime"
 	"mime/multipart"
@@ -92,15 +93,28 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 	if path != "/v1/models" && path != "/v1/sub2api/billing" && requestedKind != kind {
 		return nil, SEPFailure(403, "KEY_PURPOSE_MISMATCH", "Key 用途与调用接口不匹配", "authorize")
 	}
+	copyKey := *key
+	copyKey.SEP = &SEPExecution{EnterprisePK: enterprisePK, EnterpriseID: enterprise, IntegrationID: integration, Kind: kind, Service: s, DirectBilling: direct}
+	hash := sepHash([]byte(r.Method + "\n" + r.URL.RequestURI() + "\n" + r.Header.Get("Content-Type") + "\n" + r.Header.Get("X-SEP-Quote-ID") + "\n" + r.Header.Get("X-Video-Operation") + "\n" + sepHash(body)))
+	if execute && kind != "chat" {
+		id := r.Header.Get("X-SEP-Execution-ID")
+		if direct {
+			id = r.Header.Get("Idempotency-Key")
+		}
+		if err = sepID(id); err != nil {
+			return nil, err
+		}
+		if replay, replayErr := s.replayMediaExecution(ctx, &copyKey, r, id, hash); replayErr != nil || replay != nil {
+			return replay, replayErr
+		}
+	}
 	if status != "ready" && !read {
 		return nil, SEPFailure(403, "ENTERPRISE_DISABLED", "企业已停用，不能发起新任务", "authorize")
 	}
 	if key.IsExpired() && !read {
 		return nil, SEPFailure(403, "API_KEY_EXPIRED", "企业 Key 已过期", "authorize")
 	}
-	copyKey := *key
-	copyKey.SEP = &SEPExecution{EnterprisePK: enterprisePK, EnterpriseID: enterprise, IntegrationID: integration, Kind: kind, Service: s, DirectBilling: direct}
-	if err = checkSEPRotatedCredential(ctx, s.db, &copyKey, path, execute || mediaOperation, quote); err != nil {
+	if err = checkSEPRotatedCredential(ctx, s.db, &copyKey, path, execute || mediaOperation, quote, r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/videos/") && r.URL.Query().Get("id_type") == "request_id"); err != nil {
 		return nil, err
 	}
 	if execute {
@@ -144,11 +158,13 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 		if outstanding {
 			return nil, SEPFailure(402, "ENTERPRISE_BILL_OUTSTANDING", "企业存在未结清费用，新增生成暂缓；请补足资金并等待原单结清，不要重新生成原任务", "authorize")
 		}
-		hash := sepHash([]byte(r.Method + "\n" + r.URL.RequestURI() + "\n" + r.Header.Get("Content-Type") + "\n" + r.Header.Get("X-SEP-Quote-ID") + "\n" + r.Header.Get("X-Video-Operation") + "\n" + sepHash(body)))
 		var oldHash string
 		var oldPK int64
 		lookup := s.db.QueryRowContext(ctx, `SELECT request_hash,enterprise_pk FROM sep_executions WHERE integration_id=$1 AND execution_id=$2`, integration, id).Scan(&oldHash, &oldPK)
 		if lookup == nil {
+			if kind != "chat" {
+				return s.replayMediaExecution(ctx, &copyKey, r, id, hash)
+			}
 			if oldHash != hash || oldPK != enterprisePK {
 				return nil, sepConflict("IDEMPOTENCY_CONFLICT", "执行编号已用于其他请求")
 			}
@@ -191,10 +207,9 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 		e.Rate = rate
 		e.Price = price
 		e.Multipliers = SEPMultipliers{Token: token, Image: image, Video: video}
+		var quoteErr error
 		if kind != "chat" {
-			if err = s.VerifyMediaQuote(ctx, r, body, &copyKey); err != nil {
-				return nil, err
-			}
+			quoteErr = s.VerifyMediaQuote(ctx, r, body, &copyKey)
 		}
 		origin := "sep"
 		if direct {
@@ -213,7 +228,8 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 		if err = checkSEPRotatedCredential(ctx, tx, &copyKey, path, true, false); err != nil {
 			return nil, err
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO sep_executions(id,integration_id,enterprise_pk,execution_id,api_key_id,kind,model,request_hash,exchange_rate,price_snapshot,multiplier_snapshot,group_id,billing_origin) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(integration_id,execution_id) DO NOTHING`, e.ComputeRequestID, integration, enterprisePK, id, key.ID, kind, model, hash, e.Rate, string(sepJSON(e.Price)), string(sepJSON(e.Multipliers)), *key.GroupID, origin)
+		clientID, idem := sepMediaIdentity(r)
+		result, err := tx.ExecContext(ctx, `INSERT INTO sep_executions(id,integration_id,enterprise_pk,execution_id,api_key_id,kind,model,request_hash,exchange_rate,price_snapshot,multiplier_snapshot,group_id,billing_origin,client_request_id,idempotency_key,request_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(integration_id,execution_id) DO NOTHING`, e.ComputeRequestID, integration, enterprisePK, id, key.ID, kind, model, hash, e.Rate, string(sepJSON(e.Price)), string(sepJSON(e.Multipliers)), *key.GroupID, origin, clientID, idem, path)
 		if err != nil {
 			return nil, err
 		}
@@ -222,6 +238,9 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 		}
 		n, _ := result.RowsAffected()
 		if n == 0 {
+			if kind != "chat" {
+				return s.replayMediaExecution(ctx, &copyKey, r, id, hash)
+			}
 			var oldHash string
 			var oldPK int64
 			if err = s.db.QueryRowContext(ctx, `SELECT request_hash,enterprise_pk FROM sep_executions WHERE integration_id=$1 AND execution_id=$2`, integration, id).Scan(&oldHash, &oldPK); err != nil {
@@ -231,6 +250,14 @@ func (s *SEPService) AuthorizeGateway(ctx context.Context, r *http.Request, key 
 				return nil, sepConflict("IDEMPOTENCY_CONFLICT", "执行编号已用于其他请求")
 			}
 			return nil, sepConflict("EXECUTION_ALREADY_RECEIVED", "请求已受理，请查询原执行费用，不能再次生成")
+		}
+		if quoteErr != nil {
+			// No provider request has been sent. Preserve this execution so SEP
+			// can recover its original rejection and confirm the zero-fee bill.
+			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			billingErr := s.finalizeUnsubmittedMedia(finalCtx, &copyKey)
+			cancel()
+			return nil, &SEPRejectedMediaError{Key: &copyKey, Cause: quoteErr, BillingError: billingErr}
 		}
 	}
 	return &copyKey, nil
@@ -268,8 +295,20 @@ func sepRequestModel(r *http.Request, body []byte) (string, error) {
 	}
 	return model, nil
 }
-func (s *SEPService) FinishGateway(ctx context.Context, e *SEPExecution, status int) {
-	if e == nil || e.ComputeRequestID == "" {
+func (s *SEPService) FinishGateway(ctx context.Context, key *APIKey, status int) {
+	if key == nil || key.SEP == nil {
+		return
+	}
+	e := key.SEP
+	if e.ComputeRequestID == "" || e.ReplayOnly {
+		return
+	}
+	if e.Kind == "video" || e.Kind == "image" {
+		if status >= 400 {
+			if err := s.finalizeUnsubmittedMedia(ctx, key); err != nil {
+				slog.Error("sep.media_rejection_billing_failed", "compute_request_id", e.ComputeRequestID, "reason", safeVideoError(err))
+			}
+		}
 		return
 	}
 	// Until usage evidence commits, a successful response is not a final fee.
@@ -341,6 +380,15 @@ func (s *SEPService) FinalizeUsage(ctx context.Context, e *SEPExecution, cmd *Us
 			return nil, err
 		}
 	}
+	if e.MediaRejectionScope != "" {
+		var eligible bool
+		if err = tx.QueryRowContext(ctx, `SELECT fee_status='pending' AND CASE WHEN $3='not_dispatched' THEN dispatched_at IS NULL ELSE task_id IS NULL END FROM sep_executions WHERE id=$1 AND api_key_id=$2 FOR UPDATE`, e.ComputeRequestID, cmd.APIKeyID, e.MediaRejectionScope).Scan(&eligible); err != nil {
+			return nil, err
+		}
+		if !eligible {
+			return &UsageBillingApplyResult{Applied: false}, nil
+		}
+	}
 	var fee, oldEvidence string
 	err = tx.QueryRowContext(ctx, `SELECT fee_status,COALESCE(fee_evidence_hash,'') FROM sep_executions WHERE id=$1 AND api_key_id=$2 FOR UPDATE`, e.ComputeRequestID, cmd.APIKeyID).Scan(&fee, &oldEvidence)
 	if err != nil {
@@ -360,7 +408,7 @@ func (s *SEPService) FinalizeUsage(ctx context.Context, e *SEPExecution, cmd *Us
 		usage["video_count"] = log.VideoCount
 		usage["video_duration_seconds"] = log.VideoDurationSeconds
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE sep_executions SET execution_status='completed',fee_status='final',gross_usd=$1,gross_cny=$2,bill_id=$3,bill_version=1,fee_evidence_hash=$4,usage=$5,account_id=COALESCE(NULLIF($6,0),account_id),finalized_at=NOW(),updated_at=NOW(),resource_version=resource_version+1 WHERE id=$7`, usd.String(), gross, sepRandom("bill_"), evidence, string(sepJSON(usage)), cmd.AccountID, e.ComputeRequestID)
+	_, err = tx.ExecContext(ctx, `UPDATE sep_executions SET execution_status='completed',fee_status='final',billing_error='',gross_usd=$1,gross_cny=$2,bill_id=$3,bill_version=1,fee_evidence_hash=$4,usage=$5,account_id=COALESCE(NULLIF($6,0),account_id),finalized_at=NOW(),updated_at=NOW(),resource_version=resource_version+1 WHERE id=$7`, usd.String(), gross, sepRandom("bill_"), evidence, string(sepJSON(usage)), cmd.AccountID, e.ComputeRequestID)
 	if err != nil {
 		return nil, err
 	}

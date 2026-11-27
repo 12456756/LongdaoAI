@@ -322,7 +322,11 @@ func (s *OpenAIGatewayService) contractFromTask(ctx context.Context, c *gin.Cont
 		v.IsFinal = nil
 		v.StatusSource = nil
 	}
-	v.Billing = s.VideoRequestBillingStatus(ctx, key, v.RequestID)
+	if meta.Protocol == VideoProtocolOpenAI && key.SEP != nil {
+		v.Billing = key.SEP.Service.videoTaskBilling(ctx, key, meta.TaskID)
+	} else {
+		v.Billing = s.VideoRequestBillingStatus(ctx, key, v.RequestID)
+	}
 }
 
 // ResolveVideoQuery returns done=true when local evidence is all that is available.
@@ -393,6 +397,12 @@ func (s *OpenAIGatewayService) ReplayVideoCreate(ctx context.Context, c *gin.Con
 	}
 	data, err := store.VideoLoad(ctx, videoSubmissionKey(key, idem))
 	if errors.Is(err, redis.Nil) {
+		if key.SEP != nil && key.SEP.ReplayOnly {
+			v := contractFor(c)
+			v.SubmissionStatus = "unobserved"
+			v.Billing = VideoBillingStatus{Status: "unknown"}
+			return false, videoError(410, "video_task_association_expired", "Original video submission receipt is unavailable; this execution will not be submitted again")
+		}
 		return false, nil
 	}
 	if err != nil {

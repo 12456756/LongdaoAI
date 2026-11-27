@@ -141,7 +141,7 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.JSON(200, value)
+		service.WriteMediaJSON(c, 200, value)
 		return
 	}
 	if value, ok := c.Get("sep_platform_validation"); ok {
@@ -151,7 +151,7 @@ func (h *GatewayHandler) VideoPricing(c *gin.Context) {
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.JSON(200, v)
+		service.WriteMediaJSON(c, 200, v)
 		return
 	}
 	c.Header("Cache-Control", "no-store")
