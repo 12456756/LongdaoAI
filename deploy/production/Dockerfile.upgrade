@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=ghcr.io/12456756/sub2api:2026.11.19-1
+FROM ${BASE_IMAGE}
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.source="https://github.com/12456756/LongdaoAI"
+LABEL org.opencontainers.image.version="2026.11.27-1"
+LABEL org.opencontainers.image.revision="${SOURCE_COMMIT}"
+COPY --chown=1000:1000 --chmod=755 sub2api /app/sub2api

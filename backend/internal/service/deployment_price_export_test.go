@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"sort"
@@ -77,4 +78,41 @@ func TestDeploymentExportLegacyPrices(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(dir+"/legacy-effective-prices.json", out, 0600))
 	t.Logf("Exported %d models without upstream requests", len(result))
+}
+
+func TestDeploymentValidateManagedPrices(t *testing.T) {
+	dir := os.Getenv("LONGDAO_DEPLOYMENT_PRICE_DIR")
+	if dir == "" {
+		t.Skip("offline deployment comparison is not requested")
+	}
+	pricing := NewPricingService(&config.Config{}, nil)
+	require.NoError(t, pricing.loadPricingData(dir+"/model_pricing.json"))
+	billing := NewBillingService(&config.Config{}, pricing)
+	raw, err := os.ReadFile(dir + "/managed-base-prices.json")
+	require.NoError(t, err)
+	var bases []ModelBasePrice
+	require.NoError(t, json.Unmarshal(raw, &bases))
+	for _, base := range bases {
+		t.Run(base.Model, func(t *testing.T) {
+			if base.Price.Mode == BillingModeToken {
+				old, err := billing.GetModelPricing(base.Model)
+				require.NoError(t, err)
+				for _, tier := range []string{"", "priority", "flex"} {
+					for _, tokens := range []UsageTokens{{InputTokens: 10000, OutputTokens: 500, CacheReadTokens: 3000, CacheCreationTokens: 1000}, {InputTokens: 300000, OutputTokens: 5000, CacheReadTokens: 100000, CacheCreationTokens: 20000}, {InputTokens: 10000, OutputTokens: 1000, CacheCreationTokens: 1500, CacheCreation5mTokens: 1000, CacheCreation1hTokens: 500}} {
+						want := billing.computeTokenBreakdown(old, tokens, 0.5, tier, true)
+						got, err := billing.CalculateBasePrice(WithBasePriceSnapshot(context.Background(), &base), base.Model, "", tokens, 1, 0, 0.5, tier)
+						require.NoError(t, err)
+						require.InDelta(t, want.ActualCost, got.ActualCost, 1e-9, "service tier %s", tier)
+					}
+				}
+			} else if base.Price.Mode == BillingModeImage {
+				for _, tier := range []string{"1K", "2K", "4K"} {
+					want := billing.CalculateImageCost(base.Model, tier, 2, nil, 1)
+					got, err := billing.CalculateBasePrice(WithBasePriceSnapshot(context.Background(), &base), base.Model, tier, UsageTokens{}, 2, 0, 1, "")
+					require.NoError(t, err)
+					require.InDelta(t, want.ActualCost, got.ActualCost, 1e-10)
+				}
+			}
+		})
+	}
 }
