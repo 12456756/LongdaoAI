@@ -151,6 +151,11 @@ class FailurePathTests(unittest.TestCase):
         self.assertEqual(self.caddy.read_text(), BLOCK)
         self.assertFalse(any('stop' in c for c in self.commands))
 
+    def test_shared_database_entry_refuses_active_isolated_environment(self):
+        (self.root/'deploy/isolated-active.json').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError,'shared-database release entry is disabled'):
+            release.Release.preflight(self.r)
+
     def test_reload_failure_restores_route_before_stopping_target(self):
         events = []
         def switch(expected, replacement, path):

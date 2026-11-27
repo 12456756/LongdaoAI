@@ -70,3 +70,20 @@ Use the candidate Compose with project name `longdao-upgrade` for inspection and
 service maintenance; prepare subsequent releases against the active environment,
 not the retained original database. The active topology is recorded in
 `/www/longdao/deploy/isolated-active.json`.
+
+## Release Result
+
+The server job completed on 2026-11-27 at 07:49:18 UTC (15:49:18 Beijing time).
+Maintenance began at 07:47:20 UTC. The new environment is live; the original
+green application is cleanly stopped and its PostgreSQL and Redis remain retained.
+All 18 migrations ran against the new database. The final restore matched the
+original balances, core record counts and usage totals. Redis media values and
+absolute expiration times matched for 125 records in the rehearsal.
+
+Public health/version, original key model catalogs, image/video pricing and an
+existing signed PNG reference HEAD all passed. SEP process identities remained
+unchanged. No additional paid model call was issued for deployment verification.
+The shared-database release entry is explicitly blocked when isolated-active.json
+exists. The server Compose wrapper now uses project `longdao-upgrade` and the
+active isolated Compose. Private acceptance evidence is stored in the environment
+directory; no production credentials or database backups are committed here.

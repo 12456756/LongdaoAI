@@ -493,6 +493,39 @@ def rehearse_recovery():
     print('Recovery rehearsal PASS: original application and routing retained; no original database restore',flush=True)
 
 
+def post_verify():
+    import huawei_release as release
+    operator=release.Release()
+    try:
+        operator.smoke('https://ai.longdaoec.com','2026.11.27-1')
+        current=smoke('https://ai.longdaoec.com')
+        expected=json.loads((ROOT/'upgrades/20261127-rehearsal/smoke-18080.json').read_text())
+        if current!=expected: raise RuntimeError('Public model catalog or media prices differ from verified baseline')
+        before=json.loads((ROOT/'deploy/last-release.json').read_text())['sep_before']
+        if operator.edge_state()!=before: raise RuntimeError('SEP process identity changed')
+        keys=redis_cli(REDIS,'--scan','--pattern','video:reference:*').splitlines()
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        reference=None
+        for key in keys:
+            try:
+                expiry=json.loads(redis_cli(REDIS,'HGET',key,'expires_at'))
+                url=json.loads(redis_cli(REDIS,'HGET',key,'signed_url'))
+                if expiry<=time.time() or not url: continue
+                request=urllib.request.Request(url,method='HEAD')
+                with opener.open(request,timeout=15) as response:
+                    reference={'status':response.status,'content_length':response.headers.get('Content-Length'),'content_type':response.headers.get('Content-Type')}
+                if reference['status']!=200: raise RuntimeError('Existing signed reference HEAD failed')
+                break
+            except urllib.error.HTTPError as failure:
+                raise RuntimeError('Existing signed reference HEAD returned HTTP '+str(failure.code)) from None
+        report={'version':'2026.11.27-1','public_health':True,'original_key_catalog_equal':True,
+            'media_quote_equal':True,'sep_processes_unchanged':True,'signed_reference':reference,
+            'model_generation_calls':0,'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        write_json(ENVROOT/'post-verification.json',report)
+        print(json.dumps(report))
+    finally: operator.log.close()
+
+
 def rollback(force=False):
     import huawei_release as release
     stored=ENVROOT/'state.json'
@@ -637,12 +670,19 @@ def snapshot(directory):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['inventory', 'snapshot', 'layout', 'prepare', 'restore', 'migrate', 'prices','live-prices','smoke','start','permissions','baseline','compare','runtime','export-prices','cutover','rollback','providers','validate-maintenance','launch','recover','rehearse-recovery'])
+    parser.add_argument('action', choices=['inventory', 'snapshot', 'layout', 'prepare', 'restore', 'migrate', 'prices','live-prices','smoke','start','permissions','baseline','compare','runtime','export-prices','cutover','rollback','providers','validate-maintenance','launch','recover','rehearse-recovery','post-verify'])
     parser.add_argument('--directory')
     parser.add_argument('--image')
     parser.add_argument('--base', default='candidate')
     args = parser.parse_args()
-    if args.action=='rehearse-recovery':
+    offline_actions={'prepare','restore','migrate','prices','permissions','baseline','runtime','providers','cutover','launch','rehearse-recovery'}
+    state_path=ENVROOT/'state.json'
+    if args.action in offline_actions and state_path.exists():
+        if json.loads(state_path.read_text())['phase'] in ('opening','live'):
+            raise RuntimeError('Candidate is now the live production environment; offline migration/rehearsal actions are disabled')
+    if args.action=='post-verify':
+        post_verify()
+    elif args.action=='rehearse-recovery':
         rehearse_recovery()
     elif args.action=='launch':
         launch()
@@ -673,7 +713,8 @@ def main():
         compose('up','-d','app')
     elif args.action == 'smoke':
         results=smoke(candidate_base() if args.base=='candidate' else args.base)
-        if args.directory: write_json(Path(args.directory)/('smoke-'+args.base.rsplit(':',1)[-1]+'.json'),results)
+        label=args.base if args.base=='candidate' else str(urllib.parse.urlsplit(args.base).port or urllib.parse.urlsplit(args.base).hostname)
+        if args.directory: write_json(Path(args.directory)/('smoke-'+label+'.json'),results)
         print(json.dumps(results,ensure_ascii=False))
     elif args.action == 'live-prices':
         live_prices(Path(args.directory))

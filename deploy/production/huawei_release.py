@@ -181,6 +181,8 @@ class Release:
         return hashlib.sha256(encoded).hexdigest()
 
     def preflight(self):
+        if (ROOT / 'deploy/isolated-active.json').exists():
+            raise RuntimeError('Isolated database environment is active; the shared-database release entry is disabled. Inspect deploy/isolated-active.json and use the active environment runbook.')
         binding = read_json(self.deploy / 'release-target.json')
         if Path('/etc/machine-id').read_text().strip() != binding['machine_id']:
             raise RuntimeError('Wrong target machine')
